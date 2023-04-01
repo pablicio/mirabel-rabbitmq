@@ -9,10 +9,7 @@
   "autoload": {
     "psr-4": {
       "Pablicio\\PhpRabbitmqSupport\\": "src/"
-    },
-    "files": [
-      "src/helpers.php"
-    ]
+    }
   },
   "authors": [
     {
