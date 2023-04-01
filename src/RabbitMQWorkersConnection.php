@@ -1,6 +1,6 @@
 <?php
 
-namespace Pablicio\PhpRabbitmqSupport;
+namespace Pablicio\MirabelRabbitmq;
 
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 

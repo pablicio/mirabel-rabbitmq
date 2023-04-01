@@ -1,11 +1,11 @@
 <?php
 
-namespace Pablicio\PhpRabbitmqSupport;
+namespace Pablicio\MirabelRabbitmq;
 
 use Illuminate\Support\ServiceProvider;
 
 
-class PhpRabbitmqSupportServiceProvider extends ServiceProvider
+class MirabelRabbitmqServiceProvider extends ServiceProvider
 {
   public function boot()
   {
