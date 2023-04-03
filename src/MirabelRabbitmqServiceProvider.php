@@ -17,6 +17,5 @@ class MirabelRabbitmqServiceProvider extends ServiceProvider
   public function register()
   {
     $this->mergeConfigFrom(__DIR__.'/../config/mirabel_rabbitmq.php', 'mirabel_rabbitmq');
-
   }
 }

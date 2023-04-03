@@ -11,6 +11,7 @@ trait RabbitMQWorkersConnection
 
   public function consume()
   {
+    // Config Connection
     $connection = new AMQPStreamConnection(
       config('mirabel_rabbitmq.connections.rabbitmq-php.host'),
       config('mirabel_rabbitmq.connections.rabbitmq-php.port'),
@@ -20,11 +21,13 @@ trait RabbitMQWorkersConnection
 
     $channel = $connection->channel();
 
+    // Declare Exchange
     $channel->exchange_declare(
       config('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
       config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type')
     );
 
+    // Declare Queue
     $channel->queue_declare(
       $this->queue,
       false,
@@ -33,6 +36,7 @@ trait RabbitMQWorkersConnection
       false
     );
 
+    // Subscribe in all routing keys
     foreach ($this->routingKeys as $routing) {
       $channel->queue_bind(
         $this->queue,
@@ -41,12 +45,12 @@ trait RabbitMQWorkersConnection
       );
     }
 
-    echo "[*] Waiting for messages. To exit press CTRL+C\n";
-
+    // Define callback function
     $callback = function ($msg) {
       $this->work($msg->body, $msg);
     };
 
+    // Define consumer
     $channel->basic_consume(
       $this->queue,
       '',
@@ -60,6 +64,8 @@ trait RabbitMQWorkersConnection
     while ($channel->is_consuming()) {
       $channel->wait();
     }
+
+    // Close Connection
     $channel->close();
     $connection->close();
   }

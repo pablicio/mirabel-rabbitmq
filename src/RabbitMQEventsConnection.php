@@ -12,6 +12,7 @@ trait RabbitMQEventsConnection
 
   public function publish()
   {
+    // Config Connection
     $connection = new AMQPStreamConnection(
       config('mirabel_rabbitmq.connections.rabbitmq-php.host'),
       config('mirabel_rabbitmq.connections.rabbitmq-php.port'),
@@ -35,7 +36,7 @@ trait RabbitMQEventsConnection
       $this->routingKey
     );
 
-    echo "[Order Service] Enviou...!\n";
+    // Close Connection
     $channel->close();
     $connection->close();
   }
