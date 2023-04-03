@@ -74,5 +74,5 @@ class OrderReceivedWorker
 ### How to call the subscriber
 
 ```php 
-  (new OrderReceivedWorker)->consume();
+  (new App\Workers\OrderReceivedWorker)->consume();
 ```
