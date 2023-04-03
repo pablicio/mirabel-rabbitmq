@@ -13,16 +13,16 @@ trait RabbitMQEventsConnection
   public function publish()
   {
     $connection = new AMQPStreamConnection(
-      config('rabbitmq_php_support.connections.rabbitmq-php.host'),
-      config('rabbitmq_php_support.connections.rabbitmq-php.port'),
-      config('rabbitmq_php_support.connections.rabbitmq-php.user'),
-      config('rabbitmq_php_support.connections.rabbitmq-php.password')
+      config('mirabel_rabbitmq.connections.rabbitmq-php.host'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.port'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.user'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.password')
     );
 
     $channel = $connection->channel();
     $channel->exchange_declare(
-      config('rabbitmq_php_support.connections.rabbitmq-php.exchange'),
-      config('rabbitmq_php_support.connections.rabbitmq-php.exchange_type')
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type')
     );
 
     // Message Body
@@ -31,7 +31,7 @@ trait RabbitMQEventsConnection
     // Basic Publish
     $channel->basic_publish(
       $msg,
-      config('rabbitmq_php_support.connections.rabbitmq-php.exchange'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
       $this->routingKey
     );
 
