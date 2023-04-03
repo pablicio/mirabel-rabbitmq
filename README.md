@@ -3,8 +3,14 @@
 
 ##
 # Installing
+
 ```
 composer require pablicio/mirabel-rabbitmq
+```
+
+# Publish configs
+```
+php artisan vendor:publish --provider="Pablicio\MirabelRabbitmq\MirabelRabbitmqServiceProvider"
 ```
 
 ## Usage examples
