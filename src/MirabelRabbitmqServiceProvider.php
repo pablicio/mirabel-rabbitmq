@@ -10,13 +10,13 @@ class MirabelRabbitmqServiceProvider extends ServiceProvider
   public function boot()
   {
     $this->publishes([
-      __DIR__ . '/../config/rabbitmq_php_support.php' => config_path('rabbitmq_php_support.php'),
+      __DIR__ . '/../config/mirabel_rabbitmq.php' => config_path('mirabel_rabbitmq.php'),
     ], 'config');
   }
 
   public function register()
   {
-    $this->mergeConfigFrom(__DIR__.'/../config/rabbitmq_php_support.php', 'rabbitmq_php_support');
+    $this->mergeConfigFrom(__DIR__.'/../config/mirabel_rabbitmq.php', 'mirabel_rabbitmq');
 
   }
 }
