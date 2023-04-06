@@ -84,14 +84,18 @@ trait RabbitMQWorkersConnection
     }
 
     $callback = function ($msg) use ($arguments, $channel, $deadLetterExchangeError, &$max_retry_counter) {
+      // ponto de bug, max_attempts pode vir vazio
       if ($max_retry_counter >= $arguments['max_attempts']) {
         $channel->basic_publish(
           $msg,
           $deadLetterExchangeError
         );
+
         $msg->ack();
       } else {
-        if ($this->work($msg->body, $msg) === 'ack') {
+        // Ponto de bug, ao mandar uma nova mensagem, a varável
+        // $max_retry_counter reinicia seu valor, fazendo o retry reiniciar.
+        if ($this->work($msg) === 'ack') {
           $max_retry_counter = -1;
         }
       }
