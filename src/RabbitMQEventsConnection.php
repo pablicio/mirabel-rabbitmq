@@ -23,7 +23,9 @@ trait RabbitMQEventsConnection
     $channel = $connection->channel();
     $channel->exchange_declare(
       config('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
-      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type')
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'),
+      false, 
+      true
     );
 
     // Message Body

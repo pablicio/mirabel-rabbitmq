@@ -6,11 +6,16 @@ use PhpAmqpLib\Connection\AMQPStreamConnection;
 
 trait RabbitMQWorkersConnection
 {
-  private $queue;
-  private $routingKeys;
-
   public function consume()
   {
+    $queue             = self::QUEUE;
+    $retryQueue        = $queue . '.retry';
+    $retryQueue        = $queue . '.retry';
+    $errorQueue        = $queue . '.error';
+    $routingKeys       = self::routing_keys ?? [];
+    $arguments         = self::arguments ?? [];
+    $max_retry_counter = -1;
+
     // Config Connection
     $connection = new AMQPStreamConnection(
       config('mirabel_rabbitmq.connections.rabbitmq-php.host'),
@@ -21,52 +26,107 @@ trait RabbitMQWorkersConnection
 
     $channel = $connection->channel();
 
-    // Declare Exchange
+    // Set exchanges and queues configs
+    $exchange                = config('mirabel_rabbitmq.connections.rabbitmq-php.exchange');
+    $deadLetterExchangeRetry = config('mirabel_rabbitmq.connections.rabbitmq-php.exchange') . '.retry';
+    $deadLetterExchangeError = config('mirabel_rabbitmq.connections.rabbitmq-php.exchange') . '.error';
+
+    // Normal exchange
     $channel->exchange_declare(
-      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
-      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type')
+      $exchange, 
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'), 
+      false, 
+      true
     );
 
-    // Declare Queue
-    $channel->queue_declare(
-      $this->queue,
-      false,
-      true,
-      false,
-      false
+    // Retry exchange
+    $channel->exchange_declare(
+      $deadLetterExchangeRetry, 
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'), 
+      false, 
+      true
     );
+
+    // Error exchange
+    $channel->exchange_declare(
+      $deadLetterExchangeError, 
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'),
+      false,
+      true
+    );
+
+    // Normal queue
+    $channel->queue_declare($queue, false, true, false, false, false, new \PhpAmqpLib\Wire\AMQPTable([
+      'x-dead-letter-exchange' => '',
+      'x-dead-letter-routing-key' => $retryQueue
+    ]));
+    $channel->queue_bind($queue, $exchange);
+
+    // Retry queue with TTL
+    $channel->queue_declare($retryQueue, false, true, false, false, false, new \PhpAmqpLib\Wire\AMQPTable([
+      'x-dead-letter-exchange' => '',
+      'x-dead-letter-routing-key' => $queue,
+      'x-message-ttl' => $arguments['ttl']
+    ]));
+    $channel->queue_bind($retryQueue, $deadLetterExchangeRetry);
+
+    // Error queue with TTL
+    $channel->queue_declare($errorQueue, false, true, false, false);
+    $channel->queue_bind($errorQueue, $deadLetterExchangeError);
 
     // Subscribe in all routing keys
-    foreach ($this->routingKeys as $routing) {
+    foreach ($routingKeys as $routing) {
       $channel->queue_bind(
-        $this->queue,
+        $queue,
         config('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
         $routing
       );
     }
 
-    // Define callback function
-    $callback = function ($msg) {
-      $this->work($msg->body, $msg);
+    $callback = function ($msg) use ($arguments, $channel, $deadLetterExchangeError, &$max_retry_counter) {
+      if ($max_retry_counter >= $arguments['max_attempts']) {
+        $channel->basic_publish(
+          $msg,
+          $deadLetterExchangeError
+        );
+        $msg->ack();
+      } else {
+        if ($this->work($msg->body, $msg) === 'ack') {
+          $max_retry_counter = -1;
+        }
+      }
     };
 
-    // Define consumer
-    $channel->basic_consume(
-      $this->queue,
-      '',
-      false,
-      true,
-      false,
-      false,
-      $callback
-    );
+    // Defines how many messages will be taken from the queue at a time
+    $channel->basic_qos(null, 1, null);
 
-    while ($channel->is_consuming()) {
+    // Defines the basic Consumer
+    $channel->basic_consume($queue, '', false, false, false, false, $callback);
+
+    while (count($channel->callbacks)) {
+      // Set max retry by execution
+      if ($max_retry_counter >= $arguments['max_attempts']) {
+        $max_retry_counter = -1;
+      }
+      $max_retry_counter++;
+
       $channel->wait();
     }
 
-    // Close Connection
+    // Close connection
     $channel->close();
     $connection->close();
+  }
+
+  private function ack($msg)
+  {
+    $msg->ack();
+    return 'ack';
+  }
+
+  private function nack($msg)
+  {
+    $msg->nack();
+    return 'nack';
   }
 }

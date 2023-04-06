@@ -57,27 +57,32 @@ namespace App\Workers;
 
 use Pablicio\MirabelRabbitmq\RabbitMQWorkersConnection;
 
-class OrderReceivedWorker
+class OrderTestWorker
 {
   use RabbitMQWorkersConnection;
 
-  const QUEUE = 'my-service.request-received';
-  
-  const ROUTING_KEYS = [
-    'my-service.request-orders.received'
-  ];
+  const QUEUE = 'my-service.request-orders',
+    routing_keys = [
+      'my-service.request-orders.received'
+    ],
+    arguments = [
+      'ttl' => 2000,
+      'max_attempts' => 13
+    ];
 
-  function __construct()
+  public function work($payload, $msg)
   {
-    $this->queue = self::QUEUE;
-    $this->routingKeys = self::ROUTING_KEYS;
-  }
+    try {
+      // Your code here;
 
-  public function work($payload)
-  {
-    echo "Processed Orker Say: $payload", "\n";
+      return $this->ack($msg);
+    } catch (\Exception $e) {
+
+      return $this->nack($msg);
+    }
   }
 }
+
 ```
 
 ### How to call the subscriber
