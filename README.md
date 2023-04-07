@@ -11,10 +11,33 @@
 composer require pablicio/mirabel-rabbitmq
 ```
 
-# Publish configs
+## How to configure as a Laravel user
+#### Run the publisher and it will create the file in config/mirabel_rabbitmq.php
 ```
 php artisan vendor:publish --provider="Pablicio\MirabelRabbitmq\MirabelRabbitmqServiceProvider"
 ```
+
+Then just configure according to your environment. I recommend using helper functions like env() so you can create the variables in the .env
+
+```php
+
+<?php
+
+return [
+  'connections' => [
+    'rabbitmq-php' => [
+      'host' => '192.168.33.12',
+      'port' => 5672,
+      'user' => 'guest',
+      'password' => 'guest',
+      'exchange' => 'my-exchange',
+      'exchange_type' => 'direct'
+    ],
+  ]
+];
+```
+
+#### Users of other frameworks will have to create the config/mirabel_rabbitmq.php folder and files manually in the root of their projects and then follow the configuration mentioned above.
 
 ## Usage examples
 
