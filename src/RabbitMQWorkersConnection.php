@@ -30,6 +30,15 @@ trait RabbitMQWorkersConnection
     $deadLetterExchangeRetry = $retryQueue;
     $deadLetterExchangeError = $errorQueue;
 
+    // General exchange
+    $channel = $connection->channel();
+    $channel->exchange_declare(
+      mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
+      mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'),
+      false, 
+      true
+    );
+
     // Normal exchange
     $channel->exchange_declare(
       $exchange, 
