@@ -66,11 +66,11 @@ class OrderTestWorker
       'my-service.request-orders.received'
     ],
     arguments = [
-      'ttl' => 2000,
+      'ttl' => 2000, // in milisseconds
       'max_attempts' => 13
     ];
 
-  public function work($payload, $msg)
+  public function work($msg)
   {
     try {
       // Your code here;

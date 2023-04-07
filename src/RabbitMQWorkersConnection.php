@@ -1,6 +1,6 @@
-<?php
+<?php namespace Pablicio\MirabelRabbitmq;
 
-namespace Pablicio\MirabelRabbitmq;
+require_once(__DIR__ . '/../Support/helpers.php');
 
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 
@@ -18,23 +18,23 @@ trait RabbitMQWorkersConnection
 
     // Config Connection
     $connection = new AMQPStreamConnection(
-      config('mirabel_rabbitmq.connections.rabbitmq-php.host'),
-      config('mirabel_rabbitmq.connections.rabbitmq-php.port'),
-      config('mirabel_rabbitmq.connections.rabbitmq-php.user'),
-      config('mirabel_rabbitmq.connections.rabbitmq-php.password')
+      mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.host'),
+      mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.port'),
+      mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.user'),
+      mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.password')
     );
 
     $channel = $connection->channel();
 
     // Set exchanges and queues configs
-    $exchange                = config('mirabel_rabbitmq.connections.rabbitmq-php.exchange');
-    $deadLetterExchangeRetry = config('mirabel_rabbitmq.connections.rabbitmq-php.exchange') . '.retry';
-    $deadLetterExchangeError = config('mirabel_rabbitmq.connections.rabbitmq-php.exchange') . '.error';
+    $exchange                = mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange');
+    $deadLetterExchangeRetry = mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange') . '.retry';
+    $deadLetterExchangeError = mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange') . '.error';
 
     // Normal exchange
     $channel->exchange_declare(
       $exchange, 
-      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'), 
+      mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'), 
       false, 
       true
     );
@@ -42,7 +42,7 @@ trait RabbitMQWorkersConnection
     // Retry exchange
     $channel->exchange_declare(
       $deadLetterExchangeRetry, 
-      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'), 
+      mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'), 
       false, 
       true
     );
@@ -50,7 +50,7 @@ trait RabbitMQWorkersConnection
     // Error exchange
     $channel->exchange_declare(
       $deadLetterExchangeError, 
-      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'),
+      mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'),
       false,
       true
     );
@@ -78,23 +78,19 @@ trait RabbitMQWorkersConnection
     foreach ($routingKeys as $routing) {
       $channel->queue_bind(
         $queue,
-        config('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
+        mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
         $routing
       );
     }
 
     $callback = function ($msg) use ($arguments, $channel, $deadLetterExchangeError, &$max_retry_counter) {
-      // ponto de bug, max_attempts pode vir vazio
       if ($max_retry_counter >= $arguments['max_attempts']) {
         $channel->basic_publish(
           $msg,
           $deadLetterExchangeError
         );
-
         $msg->ack();
       } else {
-        // Ponto de bug, ao mandar uma nova mensagem, a varável
-        // $max_retry_counter reinicia seu valor, fazendo o retry reiniciar.
         if ($this->work($msg) === 'ack') {
           $max_retry_counter = -1;
         }

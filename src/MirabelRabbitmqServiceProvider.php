@@ -4,7 +4,6 @@ namespace Pablicio\MirabelRabbitmq;
 
 use Illuminate\Support\ServiceProvider;
 
-
 class MirabelRabbitmqServiceProvider extends ServiceProvider
 {
   public function boot()
@@ -16,6 +15,6 @@ class MirabelRabbitmqServiceProvider extends ServiceProvider
 
   public function register()
   {
-    $this->mergeConfigFrom(__DIR__.'/../config/mirabel_rabbitmq.php', 'mirabel_rabbitmq');
+    $this->mergeConfigFrom(__DIR__ . '/../config/mirabel_rabbitmq.php', 'mirabel_rabbitmq');
   }
 }
