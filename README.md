@@ -97,7 +97,7 @@ class OrderTestWorker
   public function work($msg)
   {
     try {
-      // Your code here;
+      print_r($msg->body);
 
       return $this->ack($msg);
     } catch (\Exception $e) {
