@@ -10,7 +10,6 @@ trait RabbitMQWorkersConnection
   {
     $queue             = self::QUEUE;
     $retryQueue        = $queue . '.retry';
-    $retryQueue        = $queue . '.retry';
     $errorQueue        = $queue . '.error';
     $routingKeys       = self::routing_keys ?? [];
     $arguments         = self::arguments ?? [];
@@ -27,9 +26,9 @@ trait RabbitMQWorkersConnection
     $channel = $connection->channel();
 
     // Set exchanges and queues configs
-    $exchange                = mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange');
-    $deadLetterExchangeRetry = mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange') . '.retry';
-    $deadLetterExchangeError = mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange') . '.error';
+    $exchange                = $queue;
+    $deadLetterExchangeRetry = $retryQueue;
+    $deadLetterExchangeError = $errorQueue;
 
     // Normal exchange
     $channel->exchange_declare(
@@ -71,11 +70,20 @@ trait RabbitMQWorkersConnection
     $channel->queue_bind($retryQueue, $deadLetterExchangeRetry);
 
     // Error queue with TTL
-    $channel->queue_declare($errorQueue, false, true, false, false);
+    $channel->queue_declare($errorQueue, false, true, false, false, false, new \PhpAmqpLib\Wire\AMQPTable([
+      'x-dead-letter-exchange' => '',
+      'x-dead-letter-routing-key' => $queue
+    ]));
     $channel->queue_bind($errorQueue, $deadLetterExchangeError);
 
     // Subscribe in all routing keys
     foreach ($routingKeys as $routing) {
+      $channel->queue_bind(
+        $queue,
+        $exchange,
+        $routing
+      );
+
       $channel->queue_bind(
         $queue,
         mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
