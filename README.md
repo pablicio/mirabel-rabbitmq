@@ -112,5 +112,5 @@ class OrderTestWorker
 ### How to call the subscriber
 
 ```php 
-  (new App\Workers\OrderReceivedWorker)->publish();
+  (new App\Workers\OrderReceivedWorker)->subscribe();
 ```
