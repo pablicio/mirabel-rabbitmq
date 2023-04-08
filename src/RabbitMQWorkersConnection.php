@@ -6,7 +6,7 @@ use PhpAmqpLib\Connection\AMQPStreamConnection;
 
 trait RabbitMQWorkersConnection
 {
-  public function consume()
+  public function subscribe()
   {
     $queue             = self::QUEUE;
     $retryQueue        = $queue . '.retry';
@@ -87,12 +87,14 @@ trait RabbitMQWorkersConnection
 
     // Subscribe in all routing keys
     foreach ($routingKeys as $routing) {
+      // bind in new generated exchange
       $channel->queue_bind(
         $queue,
         $exchange,
         $routing
       );
 
+      // bind in general exchange
       $channel->queue_bind(
         $queue,
         mb_config_path('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
@@ -108,7 +110,7 @@ trait RabbitMQWorkersConnection
         );
         $msg->ack();
       } else {
-        if ($this->work($msg) === 'ack') {
+        if ($this->work($msg) === 'ack' && !$max_retry_counter) {
           $max_retry_counter = -1;
         }
       }
@@ -145,5 +147,11 @@ trait RabbitMQWorkersConnection
   {
     $msg->nack();
     return 'nack';
+  }
+
+  private function reject($msg)
+  {
+    $msg->reject();
+    return 'reject';
   }
 }
