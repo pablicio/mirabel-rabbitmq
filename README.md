@@ -90,7 +90,6 @@ class OrderTestWorker
       'type' => 'topic'
     ],
     retry_options = [
-      'active' => true,
       'x-message-ttl' => 1000,
       'max_attempts' => 8
     ];
