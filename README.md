@@ -37,9 +37,6 @@ return [
 ];
 ```
 
-#### Users of other frameworks will have to create the config/mirabel_rabbitmq.php folder and files manually in the root of their projects and then follow the configuration mentioned above.
-* The env() helper may vary in other frameworks
-
 ## Usage examples
 
 ### Creating a publisher class
@@ -112,5 +109,5 @@ class OrderTestWorker
 ### How to call the subscriber
 
 ```php 
-  (new App\Workers\OrderReceivedWorker)->subscribe();
+  (new App\Workers\OrderReceivedWorker)->consume();
 ```
