@@ -20,7 +20,6 @@ trait RabbitMQWorkersConnection
     ########################################################################################
     ################################## Config Connection  ##################################
     ########################################################################################
-
     // Config Connection
     $connection = new AMQPStreamConnection(
       config('mirabel_rabbitmq.connections.rabbitmq-php.host'),
@@ -38,7 +37,6 @@ trait RabbitMQWorkersConnection
     ########################################################################################
     ################################ General Exchange Setting  #############################
     ########################################################################################
-
     // General Options
     $generalExchange = config('mirabel_rabbitmq.connections.rabbitmq-php.exchange');
     $generalType = config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type');
@@ -66,7 +64,6 @@ trait RabbitMQWorkersConnection
     ########################################################################################
     ################################ Normal Exchange Setting  ##############################
     ########################################################################################
-
     // Normal Options
     $queue_options = count(self::options) ? self::options : [];
 
@@ -75,7 +72,6 @@ trait RabbitMQWorkersConnection
       'type',
       config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type')
     );
-
     $normalPassive =  $this->hasCustomConfig($queue_options, 'passive' , false);
     $normalDurable = $this->hasCustomConfig($queue_options, 'durable' , true);
     $normalAutoDelete = $this->hasCustomConfig($queue_options, 'auto_delete' , true);
@@ -108,7 +104,6 @@ trait RabbitMQWorkersConnection
     ########################################################################################
     ################################ Retry Exchange Setting  ###############################
     ########################################################################################
-
     // Retry Options
     if (defined('self::retry_options')) {
       $retry_options = self::retry_options;
@@ -153,7 +148,6 @@ trait RabbitMQWorkersConnection
     ########################################################################################
     ################################ Error Exchange Setting  ###############################
     ########################################################################################
-
     if (defined('self::retry_options')) {
       // Pega as mesmas configurações de retry pra simplificar.
       $error_options = self::retry_options;
@@ -194,7 +188,6 @@ trait RabbitMQWorkersConnection
     ########################################################################################
     ################################## Subscriber Setting  #################################
     ########################################################################################
-
     foreach ($routingKeys as $routing) {
       // bind in new generated exchange
       $channel->queue_bind(
@@ -214,7 +207,6 @@ trait RabbitMQWorkersConnection
     ########################################################################################
     #################################### Callback Setting  #################################
     ########################################################################################
-
     if (defined('self::retry_options') && isset($retry_options['active']) && $retry_options['active']) {
       $callback = function ($msg) use ($retry_options, $channel, $deadLetterExchangeError, &$max_retry_counter) {
         if ($max_retry_counter >= $retry_options['max_attempts']) {
@@ -238,7 +230,6 @@ trait RabbitMQWorkersConnection
     ########################################################################################
     #################################### Consumer Setting  #################################
     ########################################################################################
-
     // Defines how many messages will be taken from the queue at a time
     $channel->basic_qos(null, 1, null);
 
@@ -248,7 +239,6 @@ trait RabbitMQWorkersConnection
     ########################################################################################
     ############################### Retry Counter Setting  #################################
     ########################################################################################
-
     while (count($channel->callbacks)) {
       // Set max retry by execution
       if (defined('self::retry_options') && isset($retry_options['active']) && $retry_options['active']) {
