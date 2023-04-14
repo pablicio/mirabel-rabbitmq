@@ -3,12 +3,12 @@
 return [
   'connections' => [
     'rabbitmq-php' => [
-      'host' => env('RABBITMQ_HOST', '192.168.33.12'),
-      'port' => env('RABBITMQ_PORT', 5672),
-      'user' => env('RABBITMQ_USER', 'guest'),
-      'password' => env('RABBITMQ_PASSWORD', 'guest'),
-      'exchange' => env('RABBITMQ_EXCHANGE', 'my-exchange'),
-      'exchange_type' => env('RABBITMQ_EXCHANGE_TYPE', 'direct')
+      'host' => env('MB_RABBITMQ_HOST', '192.168.33.12'),
+      'port' => env('MB_RABBITMQ_PORT', 5672),
+      'user' => env('MB_RABBITMQ_USER', 'guest'),
+      'password' => env('MB_RABBITMQ_PASSWORD', 'guest'),
+      'exchange' => env('MB_RABBITMQ_EXCHANGE', 'my-exchange'),
+      'exchange_type' => env('MB_RABBITMQ_EXCHANGE_TYPE', 'direct')
     ],
   ]
 ];
