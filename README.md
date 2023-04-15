@@ -88,13 +88,16 @@ class OrderTestWorker
 {
   use RabbitMQWorkersConnection;
 
-  const QUEUE = 'my-service.request-orders',
+  const QUEUE = 'my-service.request-test',
     routing_keys = [
       'my-service.request-orders.received'
     ],
-    arguments = [
-      'ttl' => 2000, // in milisseconds
-      'max_attempts' => 13
+    options = [
+      'type' => 'topic'
+    ],
+    retry_options = [
+      'x-message-ttl' => 1000,
+      'max_attempts' => 8
     ];
 
   public function work($msg)
