@@ -1,4 +1,6 @@
-<?php namespace Pablicio\MirabelRabbitmq;
+<?php
+
+namespace Pablicio\MirabelRabbitmq;
 
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
@@ -22,7 +24,7 @@ trait RabbitMQEventsConnection
     $channel->exchange_declare(
       config('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
       config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'),
-      false, 
+      false,
       true
     );
 

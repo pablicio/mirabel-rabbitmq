@@ -12,7 +12,7 @@ trait RabbitMQWorkersNormal
     // Normal exchange
     $channel->exchange_declare(
       $exchange,
-      $this->hasCustomConfig($queue_options, 'exchange_type' ,config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type')),
+      $this->hasCustomConfig($queue_options, 'exchange_type', config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type')),
       $this->hasCustomConfig($queue_options, 'exchange_passive', false),
       $this->hasCustomConfig($queue_options, 'exchange_durable', true),
       $this->hasCustomConfig($queue_options, 'exchange_auto_delete', true),
@@ -24,16 +24,17 @@ trait RabbitMQWorkersNormal
 
     // Normal Queue Settings
     $channel->queue_declare(
-      $queue, 
+      $queue,
       $this->hasCustomConfig($queue_options, 'queue_passive', false),
       $this->hasCustomConfig($queue_options, 'queue_durable', true),
       $this->hasCustomConfig($queue_options, 'queue_exclusive', true),
       $this->hasCustomConfig($queue_options, 'queue_auto_delete', false),
       $this->hasCustomConfig($queue_options, 'queue_nowait', false),
       new \PhpAmqpLib\Wire\AMQPTable([
-      'x-dead-letter-exchange' => $this->hasCustomConfig($queue_options, 'x-dead-letter-exchange', ''),
-      'x-dead-letter-routing-key' => $this->hasCustomConfig($queue_options, 'x-dead-letter-routing-key', $retryQueue)
-    ]));
+        'x-dead-letter-exchange' => $this->hasCustomConfig($queue_options, 'x-dead-letter-exchange', ''),
+        'x-dead-letter-routing-key' => $this->hasCustomConfig($queue_options, 'x-dead-letter-routing-key', $retryQueue)
+      ])
+    );
 
     // Normal Queue Binding
     $channel->queue_bind($queue, $exchange);

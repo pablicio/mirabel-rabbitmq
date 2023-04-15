@@ -25,17 +25,18 @@ trait RabbitMQWorkersRetry
 
       // Retry Queue Settings
       $channel->queue_declare(
-        $retryQueue, 
+        $retryQueue,
         $this->hasCustomConfig($retry_options, 'retry_queue_passive', false),
         $this->hasCustomConfig($retry_options, 'retry_queue_durable', true),
         $this->hasCustomConfig($retry_options, 'retry_queue_exclusive', true),
         $this->hasCustomConfig($retry_options, 'retry_queue_auto_delete', false),
         $this->hasCustomConfig($retry_options, 'retry_queue_nowait', false),
         new \PhpAmqpLib\Wire\AMQPTable([
-        'x-dead-letter-exchange' => $this->hasCustomConfig($retry_options, 'x-dead-letter-exchange', ''),
-        'x-dead-letter-routing-key' => $this->hasCustomConfig($retry_options, 'x-dead-letter-routing-key', $queue),
-        'x-message-ttl' => $this->hasCustomConfig($retry_options, 'x-message-ttl', 0)
-      ]));
+          'x-dead-letter-exchange' => $this->hasCustomConfig($retry_options, 'x-dead-letter-exchange', ''),
+          'x-dead-letter-routing-key' => $this->hasCustomConfig($retry_options, 'x-dead-letter-routing-key', $queue),
+          'x-message-ttl' => $this->hasCustomConfig($retry_options, 'x-message-ttl', 0)
+        ])
+      );
 
       // Retry Queue Binding
       $channel->queue_bind($retryQueue, $deadLetterExchangeRetry);

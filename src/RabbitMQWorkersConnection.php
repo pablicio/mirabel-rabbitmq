@@ -70,9 +70,9 @@ trait RabbitMQWorkersConnection
     ################################ Normal Exchange Setting  ##############################
     ########################################################################################
     $this->normalSettings(
-      $channel, 
-      $exchange, 
-      $queue, 
+      $channel,
+      $exchange,
+      $queue,
       $retryQueue
     );
 
@@ -80,9 +80,9 @@ trait RabbitMQWorkersConnection
     ################################ Retry Exchange Setting  ###############################
     ########################################################################################
     $retry_options = $this->retrySettings(
-      $channel, 
-      $deadLetterExchangeRetry, 
-      $queue, 
+      $channel,
+      $deadLetterExchangeRetry,
+      $queue,
       $retryQueue
     );
 
@@ -90,9 +90,9 @@ trait RabbitMQWorkersConnection
     ################################ Error Exchange Setting  ###############################
     ########################################################################################
     $this->errorSettings(
-      $channel, 
-      $deadLetterExchangeError, 
-      $queue, 
+      $channel,
+      $deadLetterExchangeError,
+      $queue,
       $errorQueue
     );
 
