@@ -2,7 +2,7 @@
 ![WhatsApp Image 2023-04-03 at 15 09 14](https://user-images.githubusercontent.com/19760320/229592412-a12e1408-6edc-458f-bff3-5935400cb921.jpeg)
 
 # mirabel-rabbitmq
-## Library to facilitate the use of rabbitmq within Laravel based on the php-amqplib library, bringing an abstraction of its use to make it simpler.
+## Library to facilitate the use of rabbitmq within php based on the php-amqplib library, bringing an abstraction of its use to make it simpler.
 
 ##
 # Installing
@@ -11,7 +11,7 @@
 composer require pablicio/mirabel-rabbitmq
 ```
 
-## How to configure in Laravel
+## How to configure as a Laravel user
 #### Run the publisher and it will create the file in config/mirabel_rabbitmq.php
 ```
 php artisan vendor:publish --provider="Pablicio\MirabelRabbitmq\MirabelRabbitmqServiceProvider"
@@ -26,12 +26,12 @@ Then just configure according to your environment.
 return [
   'connections' => [
     'rabbitmq-php' => [
-      'host' => env('MB_RABBITMQ_HOST', 'localhost'),
-      'port' => env('MB_RABBITMQ_PORT', 5672),
-      'user' => env('MB_RABBITMQ_USER', 'guest'),
-      'password' => env('MB_RABBITMQ_PASSWORD', 'guest'),
-      'exchange' => env('MB_RABBITMQ_EXCHANGE', 'my-exchange'),
-      'exchange_type' => env('MB_RABBITMQ_EXCHANGE_TYPE', 'direct')
+      'host' => env('RABBITMQ_HOST', '192.168.33.12'),
+      'port' => env('RABBITMQ_PORT', 5672),
+      'user' => env('RABBITMQ_USER', 'guest'),
+      'password' => env('RABBITMQ_PASSWORD', 'guest'),
+      'exchange' => env('RABBITMQ_EXCHANGE', 'my-exchange'),
+      'exchange_type' => env('RABBITMQ_EXCHANGE_TYPE', 'direct')
     ],
   ]
 ];
@@ -82,26 +82,22 @@ class OrderTestWorker
 {
   use RabbitMQWorkersConnection;
 
-  const QUEUE = 'my-service.request-test',
+  const QUEUE = 'my-service.request-orders',
     routing_keys = [
       'my-service.request-orders.received'
     ],
-    options = [
-      'type' => 'topic'
-    ],
-    retry_options = [
-      'x-message-ttl' => 1000,
-      'max_attempts' => 8
+    arguments = [
+      'ttl' => 2000, // in milisseconds
+      'max_attempts' => 13
     ];
 
   public function work($msg)
   {
     try {
-      print_r('OrderTest Say: ' . $msg->body . "\n");
+      print_r($msg->body);
 
       return $this->ack($msg);
     } catch (\Exception $e) {
-      print_r($e->getMessage() . "\n");
 
       return $this->nack($msg);
     }
@@ -110,11 +106,8 @@ class OrderTestWorker
 
 ```
 
-
-#### if you pass the options array empty, we assume the .env settings, if you don't want to use retry, just remove the retry_options array.
-
 ### How to call the subscriber
 
 ```php 
-  (new App\Workers\OrderReceivedWorker)->subscribe();
+  (new App\Workers\OrderReceivedWorker)->consume();
 ```

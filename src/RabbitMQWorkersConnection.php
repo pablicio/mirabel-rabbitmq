@@ -6,6 +6,11 @@ use PhpAmqpLib\Connection\AMQPStreamConnection;
 
 trait RabbitMQWorkersConnection
 {
+  use RabbitMQWorkersNormal;
+  use RabbitMQWorkersRetry;
+  use RabbitMQWorkersError;
+  use RabbitMQHelpers;
+
   public function subscribe()
   {
     ########################################################################################
@@ -64,121 +69,32 @@ trait RabbitMQWorkersConnection
     ########################################################################################
     ################################ Normal Exchange Setting  ##############################
     ########################################################################################
-    // Normal Options
-    $queue_options = count(self::options) ? self::options : [];
-
-    $normalType = $this->hasCustomConfig(
-      $queue_options,
-      'type',
-      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type')
+    $this->normalSettings(
+      $channel, 
+      $exchange, 
+      $queue, 
+      $retryQueue
     );
-    $normalPassive =  $this->hasCustomConfig($queue_options, 'passive', false);
-    $normalDurable = $this->hasCustomConfig($queue_options, 'durable', true);
-    $normalAutoDelete = $this->hasCustomConfig($queue_options, 'auto_delete', true);
-    $normalInternal = $this->hasCustomConfig($queue_options, 'internal', false);
-    $normalNowait = $this->hasCustomConfig($queue_options, 'no_wait', false);
-    $normalArguments = $this->hasCustomConfig($queue_options, 'arguments', []);
-    $normalTicket = $this->hasCustomConfig($queue_options, 'ticket', null);
-
-    // Normal exchange
-    $channel->exchange_declare(
-      $exchange,
-      $normalType,
-      $normalPassive,
-      $normalDurable,
-      $normalAutoDelete,
-      $normalInternal,
-      $normalNowait,
-      $normalArguments,
-      $normalTicket
-    );
-
-    // Normal Queue Settings
-    $channel->queue_declare($queue, false, true, false, false, false, new \PhpAmqpLib\Wire\AMQPTable([
-      'x-dead-letter-exchange' => $this->hasCustomConfig($queue_options, 'x-dead-letter-exchange', ''),
-      'x-dead-letter-routing-key' => $this->hasCustomConfig($queue_options, 'x-dead-letter-routing-key', $retryQueue)
-    ]));
-    $channel->queue_bind($queue, $exchange);
 
     ########################################################################################
     ################################ Retry Exchange Setting  ###############################
     ########################################################################################
-    // Retry Options
-    if (defined('self::retry_options')) {
-      $retry_options = self::retry_options;
-
-      $retryType =  $this->hasCustomConfig(
-        $retry_options,
-        'type',
-        config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type')
-      );
-      $retryPassive =  $this->hasCustomConfig($retry_options, 'passive', false);
-      $retryDurable = $this->hasCustomConfig($retry_options, 'durable', true);
-      $retryAutoDelete = $this->hasCustomConfig($retry_options, 'auto_delete', true);
-      $retryInternal = $this->hasCustomConfig($retry_options, 'internal', false);
-      $retryNowait = $this->hasCustomConfig($retry_options, 'no_wait', false);
-      $retryArguments = $this->hasCustomConfig($retry_options, 'arguments', []);
-      $retryTicket = $this->hasCustomConfig($retry_options, 'ticket', null);
-
-      // Retry exchange
-      $channel->exchange_declare(
-        $deadLetterExchangeRetry,
-        $retryType,
-        $retryPassive,
-        $retryDurable,
-        $retryAutoDelete,
-        $retryInternal,
-        $retryNowait,
-        $retryArguments,
-        $retryTicket
-      );
-
-      // Retry Queue Settings
-      $channel->queue_declare($retryQueue, false, true, false, false, false, new \PhpAmqpLib\Wire\AMQPTable([
-        'x-dead-letter-exchange' => $this->hasCustomConfig($retry_options, 'x-dead-letter-exchange', ''),
-        'x-dead-letter-routing-key' => $this->hasCustomConfig($retry_options, 'x-dead-letter-routing-key', $queue),
-        'x-message-ttl' => $this->hasCustomConfig($retry_options, 'x-message-ttl', 0)
-      ]));
-      $channel->queue_bind($retryQueue, $deadLetterExchangeRetry);
-    }
+    $retry_options = $this->retrySettings(
+      $channel, 
+      $deadLetterExchangeRetry, 
+      $queue, 
+      $retryQueue
+    );
 
     ########################################################################################
     ################################ Error Exchange Setting  ###############################
     ########################################################################################
-    if (defined('self::retry_options')) {
-      // Pega as mesmas configurações de retry pra simplificar.
-      $error_options = self::retry_options;
-
-      // Error Options
-      $errorType =  $this->hasCustomConfig($error_options, 'type', config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'));
-      $errorPassive =  $this->hasCustomConfig($error_options, 'passive', false);
-      $errorDurable = $this->hasCustomConfig($error_options, 'durable', true);
-      $errorAutoDelete = $this->hasCustomConfig($error_options, 'auto_delete', true);
-      $errorInternal = $this->hasCustomConfig($error_options, 'internal', false);
-      $errorNowait = $this->hasCustomConfig($error_options, 'no_wait', false);
-      $errorArguments = $this->hasCustomConfig($error_options, 'arguments', []);
-      $errorTicket = $this->hasCustomConfig($error_options, 'ticket', null);
-
-      // Error exchange
-      $channel->exchange_declare(
-        $deadLetterExchangeError,
-        $errorType,
-        $errorPassive,
-        $errorDurable,
-        $errorAutoDelete,
-        $errorInternal,
-        $errorNowait,
-        $errorArguments,
-        $errorTicket
-      );
-
-      // Error Queue Settings
-      $channel->queue_declare($errorQueue, false, true, false, false, false, new \PhpAmqpLib\Wire\AMQPTable([
-        'x-dead-letter-exchange' => $this->hasCustomConfig($error_options, 'x-dead-letter-exchange', ''),
-        'x-dead-letter-routing-key' => $this->hasCustomConfig($error_options, 'x-dead-letter-routing-key', $queue)
-      ]));
-      $channel->queue_bind($errorQueue, $deadLetterExchangeError);
-    };
+    $this->errorSettings(
+      $channel, 
+      $deadLetterExchangeError, 
+      $queue, 
+      $errorQueue
+    );
 
     ########################################################################################
     ################################## Subscriber Setting  #################################
@@ -249,28 +165,5 @@ trait RabbitMQWorkersConnection
     // Close connection
     $channel->close();
     $connection->close();
-  }
-
-  private function hasCustomConfig($config, $key, $defaultConfig)
-  {
-    return isset($config[$key]) ? $config[$key] : $defaultConfig;
-  }
-
-  private function ack($msg)
-  {
-    $msg->ack();
-    return 'ack';
-  }
-
-  private function nack($msg)
-  {
-    $msg->nack();
-    return 'nack';
-  }
-
-  private function reject($msg)
-  {
-    $msg->reject();
-    return 'reject';
   }
 }
