@@ -16,6 +16,7 @@ trait RabbitMQWorkersConnection
     ########################################################################################
     ######################################## Basic Config ##################################
     ########################################################################################
+    $options = defined('self::options') ? self::options : [];
     $queue             = defined('self::QUEUE') ? self::QUEUE : '';
     $routingKeys       = defined('self::routing_keys') && count(self::routing_keys) ? self::routing_keys : [];
     $retryQueue        = $queue . '.retry';
@@ -42,28 +43,16 @@ trait RabbitMQWorkersConnection
     ########################################################################################
     ################################ General Exchange Setting  #############################
     ########################################################################################
-    // General Options
-    $generalExchange = config('mirabel_rabbitmq.connections.rabbitmq-php.exchange');
-    $generalType = config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type');
-    $generalPassive = false;
-    $generalDurable = true;
-    $generalAutoDelete = true;
-    $generalInternal = false;
-    $generalNowait = false;
-    $generalArguments = [];
-    $generalTicket = null;
-
     // General exchange
     $channel->exchange_declare(
-      $generalExchange,
-      $generalType,
-      $generalPassive,
-      $generalDurable,
-      $generalAutoDelete,
-      $generalInternal,
-      $generalNowait,
-      $generalArguments,
-      $generalTicket
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_passive'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_durable'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_auto_delete'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_nowait'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_arguments'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_ticket'),
     );
 
     ########################################################################################
@@ -142,10 +131,23 @@ trait RabbitMQWorkersConnection
     #################################### Consumer Setting  #################################
     ########################################################################################
     // Defines how many messages will be taken from the queue at a time
-    $channel->basic_qos(null, 1, null);
+    $channel->basic_qos(
+      $this->hasCustomConfig($options, 'qos_prefetch_size', null), 
+      $this->hasCustomConfig($options, 'qos_prefetch_count', 1), 
+      $this->hasCustomConfig($options, 'qos_a_global', null)
+    );
 
     // Defines the basic Consumer
-    $channel->basic_consume($queue, '', false, false, false, false, $callback);
+    $channel->basic_consume(
+      $queue,
+      $this->hasCustomConfig($options, 'consume_consumer_tag', ''), 
+      $this->hasCustomConfig($options, 'consume_no_local', false), 
+      $this->hasCustomConfig($options, 'consume_no_ack', false), 
+      $this->hasCustomConfig($options, 'consume_exclusive', false), 
+      $this->hasCustomConfig($options, 'consume_nowait', false), 
+      $callback,
+      $this->hasCustomConfig($options, 'consume_ticket', false), 
+    );
 
     ########################################################################################
     ############################### Retry Counter Setting  #################################

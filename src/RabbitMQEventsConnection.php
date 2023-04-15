@@ -21,11 +21,16 @@ trait RabbitMQEventsConnection
     );
 
     $channel = $connection->channel();
+
     $channel->exchange_declare(
       config('mirabel_rabbitmq.connections.rabbitmq-php.exchange'),
       config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type'),
-      false,
-      true
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_passive'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_durable'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_auto_delete'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_nowait'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_arguments'),
+      config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_ticket'),
     );
 
     // Message Body

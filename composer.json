@@ -1,6 +1,6 @@
 {
   "name": "pablicio/mirabel-rabbitmq",
-  "description": "Classes to facilitate the use of rabbitmq within php based on the php-amqplib library, bringing an abstraction of its use to make its use more simplified.",
+  "description": "Library to facilitate the use of rabbitmq within php based on the php-amqplib library, bringing an abstraction of its use to make its use more simplified.",
   "type": "package",
   "require": {
     "php-amqplib/php-amqplib": "^3.5"
