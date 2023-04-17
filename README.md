@@ -115,6 +115,11 @@ class OrderTestWorker
 
 ```
 
+### How to call the subscriber
+```php 
+  (new App\Workers\OrderReceivedWorker)->subscribe();
+```
+
 #### **options** params
 | Param                       | Required | Type    |
 | :----------------           | :------: | ----:   |
@@ -169,10 +174,6 @@ class OrderTestWorker
 
 ###### If you pass the options array empty, we assume the .env settings, if you don't want to use retry, just remove the retry_options array.
 
-### How to call the subscriber
-```php 
-  (new App\Workers\OrderReceivedWorker)->subscribe();
-```
 ## Todo
  - Become agnostic to other frameworks
  - Add unit tests
