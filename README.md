@@ -142,7 +142,7 @@ class OrderTestWorker
 | x-dead-letter-exchange      |   No     | String |
 | x-dead-letter-routing-key   |   No     | String |
 
-##### The options array is required to declare. case [], we will assume the settings of .env
+###### The options array is required to declare. case [], we will assume the settings of .env
 
 #### **retry_options** params
 
@@ -166,7 +166,7 @@ class OrderTestWorker
 | x-message-ttl               |   No     | String |
 | max-attempts                |   No     | String |
 
-##### If you pass the options array empty, we assume the .env settings, if you don't want to use retry, just remove the retry_options array.
+###### If you pass the options array empty, we assume the .env settings, if you don't want to use retry, just remove the retry_options array.
 
 ### How to call the subscriber
 ```php 
