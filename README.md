@@ -10,7 +10,6 @@
 ```
 composer require pablicio/mirabel-rabbitmq
 ```
-----
 
 ## How to configure in Laravel
 #### Run the publisher and it will create the file in config/mirabel_rabbitmq.php
@@ -43,8 +42,6 @@ return [
   ]
 ];
 ```
-
-----
 
 ## Usage examples
 
@@ -123,8 +120,6 @@ class OrderTestWorker
   (new App\Workers\OrderReceivedWorker)->subscribe();
 ```
 
-----
-
 #### **Functions**
 | Worker Functions   | Description  | Return            |
 | :----------------  | :------:     | ----:             |
@@ -132,8 +127,6 @@ class OrderTestWorker
 | ack($msg)          |   Accept message and remove from queue  | 'ack' : String    |
 | nack($msg)         |   When there is an error, it sends the message to the retry queue, when the attempts are over, it sends it to the error queue | 'nack' : String   |
 | reject($msg)       |   Reject the message  'reject' : String |
-
-----
 
 #### **options** params
 | Param                       | Required | Type    |
@@ -165,8 +158,6 @@ class OrderTestWorker
 
 ###### The options array is required to declare. case [], we will assume the settings of .env
 
-----
-
 #### **retry_options** params
 
 | Param                       | Required | Type    |
@@ -190,8 +181,6 @@ class OrderTestWorker
 | max-attempts                |   No     | Integer |
 
 ###### If you pass the options array empty, we assume the .env settings, if you don't want to use retry, just remove the retry_options array.
-
-----
 
 ## Todo
  - Become agnostic to other frameworks
