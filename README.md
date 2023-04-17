@@ -122,7 +122,7 @@ class OrderTestWorker
 
 #### **Functions**
 | Worker Functions   | Description  | Return            |
-| :----------------  | :------:     | :----:             |
+| :----------------  | :------:     | :----             |
 | work($msg)         |   Function performed by the callback to process the messages | Void              |
 | ack($msg)          |   Accept message and remove from queue  | 'ack' : String    |
 | nack($msg)         |   When there is an error, it sends the message to the retry queue, when the attempts are over, it sends it to the error queue | 'nack' : String   |
