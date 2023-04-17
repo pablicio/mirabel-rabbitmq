@@ -10,6 +10,7 @@
 ```
 composer require pablicio/mirabel-rabbitmq
 ```
+----
 
 ## How to configure in Laravel
 #### Run the publisher and it will create the file in config/mirabel_rabbitmq.php
@@ -42,6 +43,8 @@ return [
   ]
 ];
 ```
+
+----
 
 ## Usage examples
 
