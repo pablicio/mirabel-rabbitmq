@@ -109,7 +109,7 @@ trait RabbitMQWorkersConnection
     ########################################################################################
     if (defined('self::retry_options')) {
       $callback = function ($msg) use ($retry_options, $channel, $deadLetterExchangeError, &$max_retry_counter) {
-        if ($max_retry_counter >= $retry_options['max_attempts']) {
+        if ($max_retry_counter >= $retry_options['max-attempts']) {
           $channel->basic_publish(
             $msg,
             $deadLetterExchangeError
@@ -155,7 +155,7 @@ trait RabbitMQWorkersConnection
     while (count($channel->callbacks)) {
       // Set max retry by execution
       if (defined('self::retry_options')) {
-        if ($max_retry_counter >= $retry_options['max_attempts']) {
+        if ($max_retry_counter >= $retry_options['max-attempts']) {
           $max_retry_counter = -1;
         }
         $max_retry_counter++;
