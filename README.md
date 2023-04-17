@@ -114,57 +114,58 @@ class OrderTestWorker
 }
 
 ```
+
 #### **options** params
-| Param                       | Required | Type   |
-| :----------------           | :------: | ----:  |
-| exchange_type               |   No     | String |
-| exchange_passive            |   No     | String |
-| exchange_durable            |   No     | String |
-| exchange_auto_delete        |   No     | String |
-| exchange_internal           |   No     | String |
-| exchange_no_wait            |   No     | String |
-| exchange_arguments          |   No     | String |
-| exchange_ticket             |   No     | String |
-| queue_passive               |   No     | String |
-| queue_durable               |   No     | String |
-| queue_exclusive             |   No     | String |
-| queue_auto_delete           |   No     | String |
-| queue_nowait                |   No     | String |
-| qos_prefetch_size           |   No     | String |
-| qos_prefetch_count          |   No     | String |
-| qos_a_global                |   No     | String |
-| consume_consumer_tag        |   No     | String |
-| consume_no_local            |   No     | String |
-| consume_no_ack              |   No     | String |
-| consume_exclusive           |   No     | String |
-| consume_nowait              |   No     | String |
-| consume_ticket              |   No     | String |
-| x-dead-letter-exchange      |   No     | String |
-| x-dead-letter-routing-key   |   No     | String |
+| Param                       | Required | Type    |
+| :----------------           | :------: | ----:   |
+| exchange_type               |   No     | String  |
+| exchange_passive            |   No     | Boolean |
+| exchange_durable            |   No     | Boolean |
+| exchange_auto_delete        |   No     | Boolean |
+| exchange_internal           |   No     | Boolean |
+| exchange_no_wait            |   No     | Boolean |
+| exchange_arguments          |   No     | Array   |
+| exchange_ticket             |   No     | Object  |
+| queue_passive               |   No     | Boolean |
+| queue_durable               |   No     | Boolean |
+| queue_exclusive             |   No     | Boolean |
+| queue_auto_delete           |   No     | Boolean |
+| queue_nowait                |   No     | Boolean |
+| qos_prefetch_size           |   No     | Integer |
+| qos_prefetch_count          |   No     | Integer |
+| qos_a_global                |   No     | Boolean |
+| consume_consumer_tag        |   No     | String  |
+| consume_no_local            |   No     | Boolean |
+| consume_no_ack              |   No     | Boolean |
+| consume_exclusive           |   No     | Boolean |
+| consume_nowait              |   No     | Boolean |
+| consume_ticket              |   No     | Object  |
+| x-dead-letter-exchange      |   No     | String  |
+| x-dead-letter-routing-key   |   No     | String  |
 
 ###### The options array is required to declare. case [], we will assume the settings of .env
 
 #### **retry_options** params
 
-| Param                       | Required | Type   |
-| :----------------           | :------: | ----:  |
-| retry_exchange_type         |   No     | String |
-| retry_exchange_passive      |   No     | String |
-| retry_exchange_durable      |   No     | String |
-| retry_exchange_auto_delete  |   No     | String |
-| retry_exchange_internal     |   No     | String |
-| retry_exchange_no_wait      |   No     | String |
-| retry_exchange_arguments    |   No     | String |
-| retry_exchange_ticket       |   No     | String |
-| retry_queue_passive         |   No     | String |
-| retry_queue_durable         |   No     | String |
-| retry_queue_exclusive       |   No     | String |
-| retry_queue_auto_delete     |   No     | String |
-| retry_queue_nowait          |   No     | String |
-| x-dead-letter-exchange      |   No     | String |
-| x-dead-letter-routing-key   |   No     | String |
-| x-message-ttl               |   No     | String |
-| max-attempts                |   No     | String |
+| Param                       | Required | Type    |
+| :----------------           | :------: | ----:   |
+| retry_exchange_type         |   No     | String  |
+| retry_exchange_passive      |   No     | Boolean |
+| retry_exchange_durable      |   No     | Boolean |
+| retry_exchange_auto_delete  |   No     | Boolean |
+| retry_exchange_internal     |   No     | Boolean |
+| retry_exchange_no_wait      |   No     | Boolean |
+| retry_exchange_arguments    |   No     | Array   |
+| retry_exchange_ticket       |   No     | Object  |
+| retry_queue_passive         |   No     | Boolean |
+| retry_queue_durable         |   No     | Boolean |
+| retry_queue_exclusive       |   No     | Boolean |
+| retry_queue_auto_delete     |   No     | Boolean |
+| retry_queue_nowait          |   No     | Boolean |
+| x-dead-letter-exchange      |   No     | String  |
+| x-dead-letter-routing-key   |   No     | String  |
+| x-message-ttl               |   No     | Integer |
+| max-attempts                |   No     | Integer |
 
 ###### If you pass the options array empty, we assume the .env settings, if you don't want to use retry, just remove the retry_options array.
 
