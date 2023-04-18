@@ -16,7 +16,7 @@ trait RabbitMQWorkersError
         $this->hasCustomConfig($error_options, 'retry_exchange_type', config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type')),
         $this->hasCustomConfig($error_options, 'retry_exchange_passive', false),
         $this->hasCustomConfig($error_options, 'retry_exchange_durable', true),
-        $this->hasCustomConfig($error_options, 'retry_exchange_auto_delete', true),
+        $this->hasCustomConfig($error_options, 'retry_exchange_auto_delete', false),
         $this->hasCustomConfig($error_options, 'retry_exchange_internal', false),
         $this->hasCustomConfig($error_options, 'retry_exchange_no_wait', false),
         $this->hasCustomConfig($error_options, 'retry_exchange_arguments', []),

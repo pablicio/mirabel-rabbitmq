@@ -15,7 +15,7 @@ trait RabbitMQWorkersNormal
       $this->hasCustomConfig($queue_options, 'exchange_type', config('mirabel_rabbitmq.connections.rabbitmq-php.exchange_type')),
       $this->hasCustomConfig($queue_options, 'exchange_passive', false),
       $this->hasCustomConfig($queue_options, 'exchange_durable', true),
-      $this->hasCustomConfig($queue_options, 'exchange_auto_delete', true),
+      $this->hasCustomConfig($queue_options, 'exchange_auto_delete', false),
       $this->hasCustomConfig($queue_options, 'exchange_internal', false),
       $this->hasCustomConfig($queue_options, 'exchange_no_wait', false),
       $this->hasCustomConfig($queue_options, 'exchange_arguments', []),
