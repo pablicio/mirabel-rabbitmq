@@ -162,7 +162,7 @@ class OrderTestWorker
 
 | Param                       | Required | Default | Type    |
 | :----------------           | :------: | :----:  | ----:   |
-| retry_exchange_type         |   No     | false   | String  |
+| retry_exchange_type         |   No     | 'topic' | String  |
 | retry_exchange_passive      |   No     | false   | Boolean |
 | retry_exchange_durable      |   No     | true    | Boolean |
 | retry_exchange_auto_delete  |   No     | false   | Boolean |
