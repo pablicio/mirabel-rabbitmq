@@ -121,64 +121,64 @@ class OrderTestWorker
 ```
 
 #### **Functions**
-| Worker Functions   | Description  | Return            |
-| :----------------  | :------:     | ----             |
+| Worker Functions   | Description  | Return   |
+| :----------------  | :------:     | -------- |
 | work($msg)         |   Function performed by the callback to process the messages | null              |
 | ack($msg)          |   Accept message and remove from queue  | 'ack'    |
 | nack($msg)         |   When there is an error, it sends the message to the retry queue, when the attempts are over, it sends it to the error queue | 'nack'   |
 | reject($msg)       |   Reject the message | 'reject' |
 
 #### **options** params
-| Param                       | Required | Type    |
-| :----------------           | :------: | ----:   |
-| exchange_type               |   No     | String  |
-| exchange_passive            |   No     | Boolean |
-| exchange_durable            |   No     | Boolean |
-| exchange_auto_delete        |   No     | Boolean |
-| exchange_internal           |   No     | Boolean |
-| exchange_no_wait            |   No     | Boolean |
-| exchange_arguments          |   No     | Array   |
-| exchange_ticket             |   No     | Object  |
-| queue_passive               |   No     | Boolean |
-| queue_durable               |   No     | Boolean |
-| queue_exclusive             |   No     | Boolean |
-| queue_auto_delete           |   No     | Boolean |
-| queue_nowait                |   No     | Boolean |
-| qos_prefetch_size           |   No     | Integer |
-| qos_prefetch_count          |   No     | Integer |
-| qos_a_global                |   No     | Boolean |
-| consume_consumer_tag        |   No     | String  |
-| consume_no_local            |   No     | Boolean |
-| consume_no_ack              |   No     | Boolean |
-| consume_exclusive           |   No     | Boolean |
-| consume_nowait              |   No     | Boolean |
-| consume_ticket              |   No     | Object  |
-| x-dead-letter-exchange      |   No     | String  |
-| x-dead-letter-routing-key   |   No     | String  |
+| Param                       | Required | Default       | Type    |
+| :----------------           | :------: | :----:        | ----:   |
+| exchange_type               |   No     | 'topic'       | String  |
+| exchange_passive            |   No     | false         | Boolean |
+| exchange_durable            |   No     | true          | Boolean |
+| exchange_auto_delete        |   No     | false         | Boolean |
+| exchange_internal           |   No     | false         | Boolean |
+| exchange_no_wait            |   No     | false         | Boolean |
+| exchange_arguments          |   No     | []            | Array   |
+| exchange_ticket             |   No     | null          | Object  |
+| queue_passive               |   No     | false         | Boolean |
+| queue_durable               |   No     | true          | Boolean |
+| queue_exclusive             |   No     | false         | Boolean |
+| queue_auto_delete           |   No     | false         | Boolean |
+| queue_nowait                |   No     | false         | Boolean |
+| qos_prefetch_size           |   No     | 0             | Integer |
+| qos_prefetch_count          |   No     | 1             | Integer |
+| qos_a_global                |   No     | null          | Boolean |
+| consume_consumer_tag        |   No     | ''            | String  |
+| consume_no_local            |   No     | false         | Boolean |
+| consume_no_ack              |   No     | false         | Boolean |
+| consume_exclusive           |   No     | false         | Boolean |
+| consume_nowait              |   No     | false         | Boolean |
+| consume_ticket              |   No     | false         | Object  |
+| x-dead-letter-exchange      |   No     | ''            | String  |
+| x-dead-letter-routing-key   |   No     | $retryQueue   | String  |
 
 ###### The options array is required to declare. case [], we will assume the settings of .env
 
 #### **retry_options** params
 
-| Param                       | Required | Type    |
-| :----------------           | :------: | ----:   |
-| retry_exchange_type         |   No     | String  |
-| retry_exchange_passive      |   No     | Boolean |
-| retry_exchange_durable      |   No     | Boolean |
-| retry_exchange_auto_delete  |   No     | Boolean |
-| retry_exchange_internal     |   No     | Boolean |
-| retry_exchange_no_wait      |   No     | Boolean |
-| retry_exchange_arguments    |   No     | Array   |
-| retry_exchange_ticket       |   No     | Object  |
-| retry_queue_passive         |   No     | Boolean |
-| retry_queue_durable         |   No     | Boolean |
-| retry_queue_exclusive       |   No     | Boolean |
-| retry_queue_auto_delete     |   No     | Boolean |
-| retry_queue_nowait          |   No     | Boolean |
-| x-dead-letter-exchange      |   No     | String  |
-| x-dead-letter-routing-key   |   No     | String  |
-| x-message-ttl               |   No     | Integer |
-| max-attempts                |   No     | Integer |
+| Param                       | Required | Default | Type    |
+| :----------------           | :------: | :----:  | ----:   |
+| retry_exchange_type         |   No     | false   | String  |
+| retry_exchange_passive      |   No     | false   | Boolean |
+| retry_exchange_durable      |   No     | true    | Boolean |
+| retry_exchange_auto_delete  |   No     | false   | Boolean |
+| retry_exchange_internal     |   No     | false   | Boolean |
+| retry_exchange_no_wait      |   No     | false   | Boolean |
+| retry_exchange_arguments    |   No     | []      | Array   |
+| retry_exchange_ticket       |   No     | null    | Object  |
+| retry_queue_passive         |   No     | false   | Boolean |
+| retry_queue_durable         |   No     | true    | Boolean |
+| retry_queue_exclusive       |   No     | false   | Boolean |
+| retry_queue_auto_delete     |   No     | false   | Boolean |
+| retry_queue_nowait          |   No     | false   | Boolean |
+| x-dead-letter-exchange      |   No     | ''      | String  |
+| x-dead-letter-routing-key   |   No     | $queue  | String  |
+| x-message-ttl               |   No     | 0       | Integer |
+| max-attempts                |   No     | 1       | Integer |
 
 ###### If you pass the options array empty, we assume the .env settings, if you don't want to use retry, just remove the retry_options array.
 

@@ -27,7 +27,7 @@ trait RabbitMQWorkersNormal
       $queue,
       $this->hasCustomConfig($queue_options, 'queue_passive', false),
       $this->hasCustomConfig($queue_options, 'queue_durable', true),
-      $this->hasCustomConfig($queue_options, 'queue_exclusive', true),
+      $this->hasCustomConfig($queue_options, 'queue_exclusive', false),
       $this->hasCustomConfig($queue_options, 'queue_auto_delete', false),
       $this->hasCustomConfig($queue_options, 'queue_nowait', false),
       new \PhpAmqpLib\Wire\AMQPTable([

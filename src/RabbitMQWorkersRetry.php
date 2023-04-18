@@ -28,7 +28,7 @@ trait RabbitMQWorkersRetry
         $retryQueue,
         $this->hasCustomConfig($retry_options, 'retry_queue_passive', false),
         $this->hasCustomConfig($retry_options, 'retry_queue_durable', true),
-        $this->hasCustomConfig($retry_options, 'retry_queue_exclusive', true),
+        $this->hasCustomConfig($retry_options, 'retry_queue_exclusive', false),
         $this->hasCustomConfig($retry_options, 'retry_queue_auto_delete', false),
         $this->hasCustomConfig($retry_options, 'retry_queue_nowait', false),
         new \PhpAmqpLib\Wire\AMQPTable([
