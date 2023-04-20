@@ -93,7 +93,7 @@ class OrderTestWorker
       'my-service.request-orders.received'
     ],
     options = [
-      'type' => 'topic'
+      'exchange_type' => 'topic'
     ],
     retry_options = [
       'x-message-ttl' => 1000,
