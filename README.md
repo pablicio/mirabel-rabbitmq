@@ -84,7 +84,7 @@ namespace App\Workers;
 
 use Pablicio\MirabelRabbitmq\RabbitMQWorkersConnection;
 
-class OrderTestWorker
+class OrderReceivedWorker
 {
   use RabbitMQWorkersConnection;
 
