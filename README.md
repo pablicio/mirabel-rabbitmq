@@ -186,7 +186,7 @@ class OrderReceivedWorker
 This library is still under development, I will come back to it very soon to evolve, but I need the community's help for this, if you want to make PRs feel like owner, my contact email is pabliciotjg@gmail.com
 
 ## Todo
-  - Add observability attributes as parameters in the publish() method such as traker_id, etc.
+  - Add observability attributes as parameters in the publish() method such as traker_id and more metadatas.
   - Become agnostic to other frameworks
   - Add unit tests
   - Improve the documentation
