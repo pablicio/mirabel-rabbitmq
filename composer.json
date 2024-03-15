@@ -23,5 +23,8 @@
       "name": "Pablicio",
       "email": "pabliciotjg@gmail.com"
     }
-  ]
+  ],
+  "require-dev": {
+    "phpunit/phpunit": "^11.0"
+  }
 }
