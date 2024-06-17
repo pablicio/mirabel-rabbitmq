@@ -182,9 +182,9 @@ class OrderReceivedWorker
 
 ###### If you pass the options array empty, we assume the .env settings, if you don't want to use retry, just remove the retry_options array.
 
-## Attention!
-This library is still under development, I will come back to it very soon to evolve, but I need the community's help for this, if you want to make PRs feel like owner, my contact email is pabliciotjg@gmail.com
+## Disclaimerm we are not responsible for its use
 
+This library is still under development, so it does not work correctly in many scenarios, it is for testing and learning, if you use it you do so at your own risk. I will return to it very soon to evolve, but I need the community's help for this, if you want PRs to feel like owners, my contact email is pabliciotjg@gmail.com
 ## Todo
   - Add observability attributes as parameters in the publish() method such as traker_id and more metadatas.
   - Become agnostic to other frameworks
