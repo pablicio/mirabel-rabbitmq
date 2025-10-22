@@ -6,6 +6,7 @@ namespace Pablicio\MirabelRabbitmq;
 
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
+use PhpAmqpLib\Channel\AMQPChannel;
 use Pablicio\MirabelRabbitmq\Contracts\PublisherInterface;
 use Pablicio\MirabelRabbitmq\Contracts\ConnectionManagerInterface;
 use Pablicio\MirabelRabbitmq\Contracts\SerializerInterface;
@@ -33,7 +34,7 @@ class Publisher implements PublisherInterface
             $exchange = $this->exchange ?? $this->getDefaultExchange($connection);
 
             // Declare exchange if needed
-            $this->declareExchange($connection, $exchange);
+            $this->declareExchange($channel, $connection, $exchange);
 
             // Serialize payload
             $body = $this->serializer->serialize($payload);
@@ -80,9 +81,8 @@ class Publisher implements PublisherInterface
         return $this;
     }
 
-    private function declareExchange(string $connection, string $exchange): void
+    private function declareExchange(AMQPChannel $channel, string $connection, string $exchange): void
     {
-        $channel = $this->connectionManager->channel($connection);
         $exchangeConfig = $this->getExchangeConfig($connection);
 
         $channel->exchange_declare(
