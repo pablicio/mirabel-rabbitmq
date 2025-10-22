@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Pablicio\MirabelRabbitmq\Serializers;
 
 use Pablicio\MirabelRabbitmq\Contracts\SerializerInterface;
-use Pablicio\MirabelRabbitmq\Exceptions\RabbitMQException;
+use Pablicio\MirabelRabbitmq\Exceptions\SerializationException;
 
 class JsonSerializer implements SerializerInterface
 {
@@ -14,7 +14,7 @@ class JsonSerializer implements SerializerInterface
         try {
             return json_encode($data, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
         } catch (\JsonException $e) {
-            throw RabbitMQException::serializationFailed($e->getMessage());
+            throw SerializationException::serializationFailed($e->getMessage());
         }
     }
 
@@ -23,7 +23,7 @@ class JsonSerializer implements SerializerInterface
         try {
             return json_decode($data, true, 512, JSON_THROW_ON_ERROR);
         } catch (\JsonException $e) {
-            throw RabbitMQException::deserializationFailed($e->getMessage());
+            throw SerializationException::deserializationFailed($e->getMessage());
         }
     }
 
