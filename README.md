@@ -1,192 +1,81 @@
 
-![WhatsApp Image 2023-04-03 at 15 09 14](https://user-images.githubusercontent.com/19760320/229592412-a12e1408-6edc-458f-bff3-5935400cb921.jpeg)
+# Mirabel RabbitMQ
 
-# mirabel-rabbitmq
-## Library to facilitate the use of rabbitmq within php based on the php-amqplib library, bringing an abstraction of its use to make it simpler.
+Framework-agnostic RabbitMQ primitives for PHP 8.2+, built on
+`php-amqplib/php-amqplib`.
 
-##
-# Installing
+Documentação completa: [docs/README.md](docs/README.md)
 
-```
-composer require pablicio/mirabel-rabbitmq
-```
+## Install
 
-## How to configure in Laravel
-#### Run the publisher and it will create the file in config/mirabel_rabbitmq.php
-```
-php artisan vendor:publish --provider="Pablicio\MirabelRabbitmq\MirabelRabbitmqServiceProvider"
+```bash
+composer require mirabel/rabbitmq
 ```
 
-Then just configure according to your environment.
+The core reads its connection lazily from the process environment:
+
+```env
+MB_RABBITMQ_HOST=localhost
+MB_RABBITMQ_PORT=5672
+MB_RABBITMQ_USER=guest
+MB_RABBITMQ_PASSWORD=guest
+MB_RABBITMQ_VHOST=/
+MB_RABBITMQ_EXCHANGE=my-exchange
+MB_RABBITMQ_EXCHANGE_TYPE=topic
+MB_RABBITMQ_PUBLISHER_CONFIRMS=false
+```
+
+## Publish
 
 ```php
-
 <?php
 
-return [
-  'connections' => [
-    'rabbitmq-php' => [
-      'host' => env('MB_RABBITMQ_HOST', 'localhost'),
-      'port' => env('MB_RABBITMQ_PORT', 5672),
-      'user' => env('MB_RABBITMQ_USER', 'guest'),
-      'password' => env('MB_RABBITMQ_PASSWORD', 'guest'),
-      'exchange' => env('MB_RABBITMQ_EXCHANGE', 'my-exchange'),
-      'exchange_type' => env('MB_RABBITMQ_EXCHANGE_TYPE', 'topic'),
-      'exchange_passive' => env('MB_RABBITMQ_EXCHANGE_PASSIVE', false),
-      'exchange_durable' => env('MB_RABBITMQ_EXCHANGE_DURABLE', true),
-      'exchange_auto_delete' => env('MB_RABBITMQ_EXCHANGE_DELETE', false),
-      'exchange_nowait' => env('MB_RABBITMQ_EXCHANGE_NOWAIT', false),
-      'exchange_arguments' => env('MB_RABBITMQ_EXCHANGE_ARGUMENTS', []),
-      'exchange_ticket' => env('MB_RABBITMQ_EXCHANGE_TICKET', null)
-    ],
-  ]
-];
-```
+use Mirabel\RabbitMQ\Event;
 
-## Usage examples
-
-### Creating a publisher class
-```php
-
-<?php
-
-namespace App\Events;
-
-use Pablicio\MirabelRabbitmq\RabbitMQEventsConnection;
-
-class OrderReceivedEvent
+final class OrderReceived extends Event
 {
-  use RabbitMQEventsConnection;
-
-  const ROUTING_KEY = 'my-service.request-orders.received';
-
-  function __construct($payload)
-  {
-    $this->routingKey = self::ROUTING_KEY;
-    $this->payload = $payload;
-  }
+    public static string $routingKey = 'orders.received';
 }
 
+(new OrderReceived(['id' => 123]))->publish();
 ```
 
-### How to call the publisher
+## Consume
 
-```php 
-(new App\Events\OrderReceivedEvent('ReceivedPayload'))->publish()
-```
-
-### Creating a listener class
 ```php
-
 <?php
 
-namespace App\Workers;
+use Mirabel\RabbitMQ\Worker;
 
-use Pablicio\MirabelRabbitmq\RabbitMQWorkersConnection;
-
-class OrderReceivedWorker
+final class OrderWorker extends Worker
 {
-  use RabbitMQWorkersConnection;
+    const QUEUE = 'orders.worker',
+        routing_keys = ['orders.received'],
+        options = ['exchange_type' => 'topic'],
+        retry_options = [
+            'x-message-ttl' => 1000,
+            'max-attempts' => 8,
+        ];
 
-  const QUEUE = 'my-service.request-test',
-    routing_keys = [
-      'my-service.request-orders.received'
-    ],
-    options = [
-      'exchange_type' => 'topic'
-    ],
-    retry_options = [
-      'x-message-ttl' => 1000,
-      'max-attempts' => 8
-    ];
+    public function work($msg)
+    {
+        try {
+            process($msg->body);
 
-  public function work($msg)
-  {
-    try {
-      print_r($msg->body);
-
-      return $this->ack($msg);
-    } catch (\Exception $e) {
-
-      return $this->nack($msg);
+            return $this->ack($msg);
+        } catch (\Throwable $exception) {
+            return $this->nack($msg);
+        }
     }
-  }
 }
 
+(new OrderWorker())->subscribe();
 ```
 
-### How to call the subscriber
-```php 
-  (new App\Workers\OrderReceivedWorker)->subscribe();
-```
+Failed messages are sent through a TTL retry queue and returned to the normal
+queue through dead-lettering. Attempts are read from RabbitMQ's `x-death`
+header, so the count survives worker restarts. Once `max_attempts` is reached,
+the message is published to the worker's `.error` queue.
 
-#### **Functions**
-| Worker Functions   | Description  | Return   |
-| :----------------  | :------:     | -------- |
-| work($msg)         |   Function performed by the callback to process the messages | null              |
-| ack($msg)          |   Accept message and remove from queue  | 'ack'    |
-| nack($msg)         |   When there is an error, it sends the message to the retry queue, when the attempts are over, it sends it to the error queue | 'nack'   |
-| reject($msg)       |   Reject the message | 'reject' |
-
-#### **options** params
-| Param                       | Required | Default       | Type    |
-| :----------------           | :------: | :----:        | ----:   |
-| exchange_type               |   No     | 'topic'       | String  |
-| exchange_passive            |   No     | false         | Boolean |
-| exchange_durable            |   No     | true          | Boolean |
-| exchange_auto_delete        |   No     | false         | Boolean |
-| exchange_internal           |   No     | false         | Boolean |
-| exchange_no_wait            |   No     | false         | Boolean |
-| exchange_arguments          |   No     | []            | Array   |
-| exchange_ticket             |   No     | null          | Object  |
-| queue_passive               |   No     | false         | Boolean |
-| queue_durable               |   No     | true          | Boolean |
-| queue_exclusive             |   No     | false         | Boolean |
-| queue_auto_delete           |   No     | false         | Boolean |
-| queue_nowait                |   No     | false         | Boolean |
-| qos_prefetch_size           |   No     | 0             | Integer |
-| qos_prefetch_count          |   No     | 1             | Integer |
-| qos_a_global                |   No     | null          | Boolean |
-| consume_consumer_tag        |   No     | ''            | String  |
-| consume_no_local            |   No     | false         | Boolean |
-| consume_no_ack              |   No     | false         | Boolean |
-| consume_exclusive           |   No     | false         | Boolean |
-| consume_nowait              |   No     | false         | Boolean |
-| consume_ticket              |   No     | false         | Object  |
-| x-dead-letter-exchange      |   No     | ''            | String  |
-| x-dead-letter-routing-key   |   No     | $retryQueue   | String  |
-
-###### The options array is required to declare. case [], we will assume the settings of .env
-
-#### **retry_options** params
-
-| Param                       | Required | Default | Type    |
-| :----------------           | :------: | :----:  | ----:   |
-| retry_exchange_type         |   No     | 'topic' | String  |
-| retry_exchange_passive      |   No     | false   | Boolean |
-| retry_exchange_durable      |   No     | true    | Boolean |
-| retry_exchange_auto_delete  |   No     | false   | Boolean |
-| retry_exchange_internal     |   No     | false   | Boolean |
-| retry_exchange_no_wait      |   No     | false   | Boolean |
-| retry_exchange_arguments    |   No     | []      | Array   |
-| retry_exchange_ticket       |   No     | null    | Object  |
-| retry_queue_passive         |   No     | false   | Boolean |
-| retry_queue_durable         |   No     | true    | Boolean |
-| retry_queue_exclusive       |   No     | false   | Boolean |
-| retry_queue_auto_delete     |   No     | false   | Boolean |
-| retry_queue_nowait          |   No     | false   | Boolean |
-| x-dead-letter-exchange      |   No     | ''      | String  |
-| x-dead-letter-routing-key   |   No     | $queue  | String  |
-| x-message-ttl               |   No     | 0       | Integer |
-| max-attempts                |   No     | 1       | Integer |
-
-###### If you pass the options array empty, we assume the .env settings, if you don't want to use retry, just remove the retry_options array.
-
-## Disclaimerm we are not responsible for its use
-
-This library is still under development, so it does not work correctly in many scenarios, it is for testing and learning, if you use it you do so at your own risk. I will return to it very soon to evolve, but I need the community's help for this, if you want PRs to feel like owners, my contact email is pabliciotjg@gmail.com
-## Todo
-  - Add observability attributes as parameters in the publish() method such as traker_id and more metadatas.
-  - Become agnostic to other frameworks
-  - Add unit tests
-  - Improve the documentation
+Delivery is at-least-once. Handlers should be idempotent, and an explicit
+`ack()` is required after successful processing.
