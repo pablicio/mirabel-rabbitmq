@@ -123,6 +123,34 @@ final class EventTest extends TestCase
             $message->properties['application_headers']->getNativeData()['x-schema-version'],
         );
     }
+
+    public function testReportsPublicationTelemetry(): void
+    {
+        putenv('MB_RABBITMQ_EXCHANGE=events');
+
+        $channel = $this->getMockBuilder(AMQPChannel::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $channel->expects(self::once())->method('exchange_declare');
+        $channel->expects(self::once())->method('basic_publish');
+        $channel->expects(self::once())->method('close');
+
+        $connection = $this->getMockBuilder(AbstractConnection::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $connection->expects(self::once())->method('channel')->willReturn($channel);
+        $connection->expects(self::once())->method('close');
+
+        \Mirabel\RabbitMQ\Observability\TelemetryRuntime::reset();
+        $event = new TestEvent(
+            new StubConnectionFactory($connection),
+            ['id' => 42],
+        );
+
+        $event->publish(messageId: 'event-42');
+
+        self::assertSame(1, \Mirabel\RabbitMQ\Observability\TelemetryRuntime::metrics()->count('published'));
+    }
 }
 
 final class StubConnectionFactory implements ConnectionFactoryInterface
@@ -165,4 +193,5 @@ final class TestEvent extends Event
     {
         return $this->factory;
     }
+
 }

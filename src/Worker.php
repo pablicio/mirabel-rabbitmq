@@ -7,6 +7,7 @@ namespace Mirabel\RabbitMQ;
 use Mirabel\RabbitMQ\Connection\ConnectionFactoryInterface;
 use Mirabel\RabbitMQ\Connection\PhpAmqpConnectionFactory;
 use Mirabel\RabbitMQ\Idempotency\IdempotencyStoreInterface;
+use Mirabel\RabbitMQ\Observability\TelemetryRuntime;
 use Mirabel\RabbitMQ\Serialization\JsonSerializer;
 use PhpAmqpLib\Message\AMQPMessage;
 use Psr\Log\LoggerInterface;
@@ -37,6 +38,11 @@ abstract class Worker
     protected function idempotencyStore(): ?IdempotencyStoreInterface
     {
         return null;
+    }
+
+    private function recordTelemetry(string $event, array $context = []): void
+    {
+        TelemetryRuntime::record($event, $context, $this->logger());
     }
 
     public function subscribe(): void
@@ -163,6 +169,17 @@ abstract class Worker
         throw new \LogicException('Worker must implement handle() or work().');
     }
 
+    /** @return array{queue: string, active_queue: ?string, connected: bool, shutdown_requested: bool} */
+    public function health(): array
+    {
+        return [
+            'queue' => $this->queueName(),
+            'active_queue' => $this->activeQueue,
+            'connected' => !$this->shutdownRequested,
+            'shutdown_requested' => $this->shutdownRequested,
+        ];
+    }
+
     public function ack(AMQPMessage $message): string
     {
         $message->ack();
@@ -246,6 +263,11 @@ abstract class Worker
                     'queue' => $queue,
                     'idempotency_key' => $idempotencyKey,
                 ]);
+                $this->recordTelemetry('duplicate_message', [
+                    'worker' => static::class,
+                    'queue' => $queue,
+                    'idempotency_key' => $idempotencyKey,
+                ]);
 
                 return;
             }
@@ -261,6 +283,13 @@ abstract class Worker
             if ($idempotencyStore !== null && $idempotencyKey !== '' && !in_array($result, ['nack', 'reject'], true)) {
                 $idempotencyStore->remember($idempotencyKey);
             }
+
+            $this->recordTelemetry('processed', [
+                'worker' => static::class,
+                'queue' => $queue,
+                'idempotency_key' => $idempotencyKey,
+                'result' => $result,
+            ]);
         } catch (\Throwable $exception) {
             if ($this->attempts($message, $queue) >= (int) ($retry['max_attempts'] ?? 1)) {
                 $channel->basic_publish($message, $errorExchange, $queue);
@@ -269,6 +298,12 @@ abstract class Worker
                     'worker' => static::class,
                     'queue' => $queue,
                     'exception' => $exception,
+                ]);
+                $this->recordTelemetry('message_sent_to_error_queue', [
+                    'worker' => static::class,
+                    'queue' => $queue,
+                    'attempt' => $this->attempts($message, $queue),
+                    'error_exchange' => $errorExchange,
                 ]);
 
                 return;
@@ -280,6 +315,11 @@ abstract class Worker
                 'queue' => $queue,
                 'attempt' => $this->attempts($message, $queue),
                 'exception' => $exception,
+            ]);
+            $this->recordTelemetry('message_retried', [
+                'worker' => static::class,
+                'queue' => $queue,
+                'attempt' => $this->attempts($message, $queue),
             ]);
         } finally {
             $this->activeChannel = null;

@@ -6,6 +6,7 @@ namespace Mirabel\RabbitMQ;
 
 use Mirabel\RabbitMQ\Connection\ConnectionFactoryInterface;
 use Mirabel\RabbitMQ\Connection\PhpAmqpConnectionFactory;
+use Mirabel\RabbitMQ\Observability\TelemetryRuntime;
 use Mirabel\RabbitMQ\Outbox\OutboxMessage;
 use Mirabel\RabbitMQ\Serialization\JsonSerializer;
 use InvalidArgumentException;
@@ -33,6 +34,11 @@ abstract class Event
         return new NullLogger();
     }
 
+    private function recordTelemetry(string $event, array $context = []): void
+    {
+        TelemetryRuntime::record($event, $context, $this->logger());
+    }
+
     public function publish(
         ?string $routingKey = null,
         ?string $messageId = null,
@@ -50,6 +56,12 @@ abstract class Event
             try {
                 $this->publishAttempt($config, $message, $outboxMessage->routingKey);
                 $this->logger()->debug('RabbitMQ event published.', [
+                    'event' => static::class,
+                    'exchange' => $outboxMessage->exchange,
+                    'routing_key' => $outboxMessage->routingKey,
+                    'message_id' => $outboxMessage->id,
+                ]);
+                $this->recordTelemetry('published', [
                     'event' => static::class,
                     'exchange' => $outboxMessage->exchange,
                     'routing_key' => $outboxMessage->routingKey,
@@ -83,6 +95,14 @@ abstract class Event
                     'attempt' => $attempt,
                     'delay_ms' => $delay,
                     'exception' => $exception,
+                ]);
+                $this->recordTelemetry('publish_retry', [
+                    'event' => static::class,
+                    'exchange' => $outboxMessage->exchange,
+                    'routing_key' => $outboxMessage->routingKey,
+                    'message_id' => $outboxMessage->id,
+                    'attempt' => $attempt,
+                    'delay_ms' => $delay,
                 ]);
                 usleep($delay * 1000);
             }
