@@ -7,6 +7,7 @@ namespace Mirabel\RabbitMQ\Tests;
 use Mirabel\RabbitMQ\Connection\ConnectionFactoryInterface;
 use Mirabel\RabbitMQ\ConnectionConfig;
 use Mirabel\RabbitMQ\Event;
+use Mirabel\RabbitMQ\Publishing\PublisherRuntime;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AbstractConnection;
 use PhpAmqpLib\Message\AMQPMessage;
@@ -16,9 +17,11 @@ final class EventTest extends TestCase
 {
     protected function tearDown(): void
     {
+        PublisherRuntime::closeAll();
         foreach (['EXCHANGE', 'EXCHANGE_TYPE'] as $name) {
             putenv('MB_RABBITMQ_' . $name);
         }
+        putenv('MB_RABBITMQ_REUSE_CONNECTION');
     }
 
     public function testPublishesJsonThroughTheInjectedConnection(): void
@@ -150,6 +153,30 @@ final class EventTest extends TestCase
         $event->publish(messageId: 'event-42');
 
         self::assertSame(1, \Mirabel\RabbitMQ\Observability\TelemetryRuntime::metrics()->count('published'));
+    }
+
+    public function testReusesConnectionForHighVolumePublishing(): void
+    {
+        putenv('MB_RABBITMQ_EXCHANGE=events');
+        putenv('MB_RABBITMQ_REUSE_CONNECTION=true');
+
+        $channel = $this->getMockBuilder(AMQPChannel::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $channel->expects(self::once())->method('exchange_declare');
+        $channel->expects(self::exactly(2))->method('basic_publish');
+        $channel->expects(self::once())->method('close');
+
+        $connection = $this->getMockBuilder(AbstractConnection::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $connection->expects(self::once())->method('channel')->willReturn($channel);
+        $connection->expects(self::once())->method('close');
+
+        $factory = new StubConnectionFactory($connection);
+        (new TestEvent($factory, ['id' => 1]))->publish(messageId: 'event-1');
+        (new TestEvent($factory, ['id' => 2]))->publish(messageId: 'event-2');
+        PublisherRuntime::closeAll();
     }
 }
 

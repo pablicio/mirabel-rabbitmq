@@ -8,6 +8,7 @@ use Mirabel\RabbitMQ\Connection\ConnectionFactoryInterface;
 use Mirabel\RabbitMQ\Connection\PhpAmqpConnectionFactory;
 use Mirabel\RabbitMQ\Observability\TelemetryRuntime;
 use Mirabel\RabbitMQ\Outbox\OutboxMessage;
+use Mirabel\RabbitMQ\Publishing\PublisherRuntime;
 use Mirabel\RabbitMQ\Serialization\JsonSerializer;
 use InvalidArgumentException;
 use PhpAmqpLib\Message\AMQPMessage;
@@ -164,6 +165,12 @@ abstract class Event
 
     private function publishAttempt(ConnectionConfig $config, AMQPMessage $message, string $routingKey): void
     {
+        if (in_array(strtolower((string) getenv('MB_RABBITMQ_REUSE_CONNECTION')), ['1', 'true', 'yes'], true)) {
+            PublisherRuntime::publish($this->connectionFactory(), $config, $message, $routingKey);
+
+            return;
+        }
+
         $connection = $this->connectionFactory()->connect($config);
         $channel = null;
 
