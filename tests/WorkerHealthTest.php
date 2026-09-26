@@ -9,16 +9,24 @@ use PHPUnit\Framework\TestCase;
 
 final class WorkerHealthTest extends TestCase
 {
-    public function testHealthCheckReportsQueueAndConnectionState(): void
+    public function testWorkerThatNeverSubscribedIsNotConnected(): void
     {
         $worker = new HealthAwareWorker();
 
         self::assertSame([
             'queue' => 'orders.received',
             'active_queue' => null,
-            'connected' => true,
+            'connected' => false,
             'shutdown_requested' => false,
         ], $worker->health());
+    }
+
+    public function testStopIsReportedAsShutdownRequest(): void
+    {
+        $worker = new HealthAwareWorker();
+        $worker->stop();
+
+        self::assertTrue($worker->health()['shutdown_requested']);
     }
 }
 

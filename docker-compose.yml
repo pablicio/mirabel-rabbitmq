@@ -1,0 +1,15 @@
+# Local broker for development and the integration tests.
+#   docker compose up -d
+#   composer test:integration
+# Management UI: http://localhost:15672 (guest / guest)
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20

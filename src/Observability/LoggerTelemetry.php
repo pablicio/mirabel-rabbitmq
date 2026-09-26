@@ -14,6 +14,6 @@ final class LoggerTelemetry implements TelemetryInterface
 
     public function record(string $event, array $context = []): void
     {
-        $this->logger->info('RabbitMQ telemetry', ['event' => $event] + $context);
+        $this->logger->debug('RabbitMQ telemetry', ['event' => $event] + $context);
     }
 }

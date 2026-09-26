@@ -6,12 +6,33 @@ namespace Mirabel\RabbitMQ;
 
 use Mirabel\RabbitMQ\Connection\ConnectionFactoryInterface;
 use Mirabel\RabbitMQ\Connection\PhpAmqpConnectionFactory;
+use Mirabel\RabbitMQ\Connection\QuietClose;
+use Mirabel\RabbitMQ\Exception\TopologyException;
 use Mirabel\RabbitMQ\Idempotency\IdempotencyStoreInterface;
 use Mirabel\RabbitMQ\Observability\TelemetryRuntime;
 use Mirabel\RabbitMQ\Serialization\JsonSerializer;
+use Mirabel\RabbitMQ\Serialization\SerializerInterface;
+use PhpAmqpLib\Exception\AMQPProtocolChannelException;
+use PhpAmqpLib\Exception\AMQPTimeoutException;
 use PhpAmqpLib\Message\AMQPMessage;
+use PhpAmqpLib\Wire\AMQPTable;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+
+/**
+ * Topology declared for a worker whose queue is "orders":
+ *
+ *   main exchange ──routing keys──▶ orders ──nack──▶ orders.retry (exchange)
+ *                                     ▲                    │
+ *                                     │                    ▼
+ *                     default exchange ◀──TTL expired── orders.retry (queue)
+ *
+ *   last attempt / reject / poison ──▶ orders.error (exchange) ──▶ orders.error (queue)
+ *
+ * The retry queue dead-letters through the default exchange straight back to
+ * "orders", so a retried message never reaches other queues bound to the same
+ * routing key.
+ */
 abstract class Worker
 {
     public static string $queue;
@@ -19,11 +40,15 @@ abstract class Worker
     public static array $retry = [];
     public static array $options = [];
 
+    /** How long a single wait() blocks before the loop re-checks stop()/signals. */
+    private const POLL_SECONDS = 1.0;
+
     private ?object $activeChannel = null;
     private ?string $activeErrorExchange = null;
     private ?string $activeQueue = null;
     private array $activeRetry = [];
     private bool $shutdownRequested = false;
+    private bool $connected = false;
 
     protected function connectionFactory(): ConnectionFactoryInterface
     {
@@ -40,14 +65,15 @@ abstract class Worker
         return null;
     }
 
-    private function recordTelemetry(string $event, array $context = []): void
+    protected function serializer(): SerializerInterface
     {
-        TelemetryRuntime::record($event, $context, $this->logger());
+        return new JsonSerializer();
     }
 
     public function subscribe(): void
     {
         $config = ConnectionConfig::fromEnvironment();
+        $this->shutdownRequested = false;
         $this->registerSignalHandlers();
         $reconnectAttempt = 0;
 
@@ -60,6 +86,21 @@ abstract class Worker
                     break;
                 }
 
+                if (self::isConfigurationError($exception)) {
+                    $this->logger()->error('RabbitMQ refused the worker topology; not retrying.', [
+                        'worker' => static::class,
+                        'queue' => $this->queueName(),
+                        'exception' => $exception,
+                    ]);
+                    throw $exception;
+                }
+
+                // A worker that was consuming normally starts a fresh reconnect budget.
+                if ($this->connected) {
+                    $reconnectAttempt = 0;
+                }
+                $this->connected = false;
+
                 $reconnectAttempt++;
                 if ($config->reconnectAttempts > 0 && $reconnectAttempt > $config->reconnectAttempts) {
                     $this->logger()->error('RabbitMQ worker stopped after reconnect attempts were exhausted.', [
@@ -71,10 +112,7 @@ abstract class Worker
                     throw $exception;
                 }
 
-                $delay = min(
-                    $config->reconnectMaxDelayMs,
-                    $config->reconnectDelayMs * (2 ** min($reconnectAttempt - 1, 10)),
-                );
+                $delay = $config->backoffDelayMs($reconnectAttempt);
                 $this->logger()->warning('RabbitMQ worker connection will retry.', [
                     'worker' => static::class,
                     'queue' => $this->queueName(),
@@ -82,44 +120,107 @@ abstract class Worker
                     'delay_ms' => $delay,
                     'exception' => $exception,
                 ]);
+                $this->recordTelemetry('worker_reconnect', [
+                    'worker' => static::class,
+                    'queue' => $this->queueName(),
+                    'attempt' => $reconnectAttempt,
+                ]);
                 usleep($delay * 1000);
             }
         }
 
-        if ($this->shutdownRequested) {
-            $this->logger()->info('RabbitMQ worker stopped gracefully.', [
-                'worker' => static::class,
-                'queue' => $this->queueName(),
-            ]);
+        $this->logger()->info('RabbitMQ worker stopped gracefully.', [
+            'worker' => static::class,
+            'queue' => $this->queueName(),
+        ]);
+    }
+
+    /**
+     * Asks the worker to finish the message in hand and leave subscribe().
+     * Safe to call from handle()/work() or from a signal handler.
+     */
+    public function stop(): void
+    {
+        $this->shutdownRequested = true;
+    }
+
+    public function handle(Envelope $envelope): void
+    {
+        throw new \LogicException('Worker must implement handle() or work().');
+    }
+
+    /** @return array{queue: string, active_queue: ?string, connected: bool, shutdown_requested: bool} */
+    public function health(): array
+    {
+        return [
+            'queue' => $this->queueName(),
+            'active_queue' => $this->activeQueue,
+            'connected' => $this->connected,
+            'shutdown_requested' => $this->shutdownRequested,
+        ];
+    }
+
+    public function ack(AMQPMessage $message): string
+    {
+        $message->ack();
+
+        return 'ack';
+    }
+
+    /**
+     * Temporary failure: the message goes to the retry queue, or to the error
+     * queue when it is already on its last attempt. With $requeue it goes
+     * straight back to the same queue, with no delay and no attempt counting.
+     */
+    public function nack(AMQPMessage $message, bool $requeue = false): string
+    {
+        if (!$requeue && $this->activeChannel !== null) {
+            $this->fail($message, true, 'nack');
+
+            return 'nack';
         }
+
+        $message->nack($requeue);
+
+        return 'nack';
+    }
+
+    /**
+     * Permanent failure: the message cannot succeed, so it is parked in the
+     * error queue without spending retries.
+     */
+    public function reject(AMQPMessage $message, bool $requeue = false): string
+    {
+        if (!$requeue && $this->activeChannel !== null) {
+            $this->fail($message, false, 'reject');
+
+            return 'reject';
+        }
+
+        $message->reject($requeue);
+
+        return 'reject';
     }
 
     private function consume(ConnectionConfig $config): void
     {
         $queue = $this->queueName();
-        $routingKeys = $this->routingKeys();
         $options = $this->options();
         $retry = $this->retrySettings();
-        $connection = $this->connectionFactory()->connect($config);
-        $channel = $connection->channel();
-        $retryExchange = $queue . '.retry';
         $errorExchange = $queue . '.error';
-        $retryQueue = $queue . '.retry';
-        $errorQueue = $queue . '.error';
-        $routingKey = $routingKeys[0] ?? $queue;
+        $connection = $this->connectionFactory()->connect($config);
+        $channel = null;
 
         try {
+            $channel = $connection->channel();
             $this->declareTopology(
                 $channel,
                 $config,
-                $retryExchange,
-                $errorExchange,
-                $retryQueue,
-                $errorQueue,
-                $routingKey,
-                $routingKeys,
+                $queue,
+                $this->routingKeys(),
                 $options['exchange_type'] ?? $config->exchangeType,
                 $retry,
+                $options['queue_type'] ?? null,
             );
 
             $channel->basic_qos(
@@ -139,13 +240,18 @@ abstract class Worker
                 },
                 $options['consume_ticket'] ?? null,
             );
+            $this->connected = true;
 
-            while ($channel->callbacks && !$this->shutdownRequested) {
-                $channel->wait();
+            while ($channel->is_consuming() && !$this->shutdownRequested) {
+                try {
+                    $channel->wait(null, false, self::POLL_SECONDS);
+                } catch (AMQPTimeoutException) {
+                    // No message within the poll window; loop to re-check stop().
+                }
             }
         } finally {
-            $channel->close();
-            $connection->close();
+            $this->connected = false;
+            QuietClose::all($channel, $connection);
         }
     }
 
@@ -157,93 +263,109 @@ abstract class Worker
 
         pcntl_async_signals(true);
         pcntl_signal(SIGTERM, function (): void {
-            $this->shutdownRequested = true;
+            $this->stop();
         });
         pcntl_signal(SIGINT, function (): void {
-            $this->shutdownRequested = true;
+            $this->stop();
         });
-    }
-
-    public function handle(Envelope $envelope): void
-    {
-        throw new \LogicException('Worker must implement handle() or work().');
-    }
-
-    /** @return array{queue: string, active_queue: ?string, connected: bool, shutdown_requested: bool} */
-    public function health(): array
-    {
-        return [
-            'queue' => $this->queueName(),
-            'active_queue' => $this->activeQueue,
-            'connected' => !$this->shutdownRequested,
-            'shutdown_requested' => $this->shutdownRequested,
-        ];
-    }
-
-    public function ack(AMQPMessage $message): string
-    {
-        $message->ack();
-
-        return 'ack';
-    }
-
-    public function nack(AMQPMessage $message, bool $requeue = false): string
-    {
-        if ($this->activeChannel !== null
-            && $this->activeErrorExchange !== null
-            && $this->activeQueue !== null
-            && $this->attempts($message, $this->activeQueue) >= (int) ($this->activeRetry['max_attempts'] ?? 1)
-        ) {
-            $this->activeChannel->basic_publish($message, $this->activeErrorExchange, $this->activeQueue);
-            $message->ack();
-
-            return 'nack';
-        }
-
-        $message->nack($requeue);
-
-        return 'nack';
-    }
-
-    public function reject(AMQPMessage $message, bool $requeue = false): string
-    {
-        $message->reject($requeue);
-
-        return 'reject';
     }
 
     private function declareTopology(
         object $channel,
         ConnectionConfig $config,
-        string $retryExchange,
-        string $errorExchange,
-        string $retryQueue,
-        string $errorQueue,
-        string $routingKey,
+        string $queue,
         array $routingKeys,
         string $exchangeType,
         array $retry,
+        ?string $queueType = null,
     ): void {
+        // 'quorum' (replicated) or 'classic'; omitted means the broker default.
+        $typed = static fn (array $arguments): array => $queueType === null
+            ? $arguments
+            : $arguments + ['x-queue-type' => ['S', $queueType]];
+        $retryExchange = $queue . '.retry';
+        $errorExchange = $queue . '.error';
+        $retryQueue = $queue . '.retry';
+        $errorQueue = $queue . '.error';
+
         $channel->exchange_declare($config->exchange, $exchangeType, false, true, false);
         $channel->exchange_declare($retryExchange, $exchangeType, false, true, false);
         $channel->exchange_declare($errorExchange, $exchangeType, false, true, false);
 
-        $channel->queue_declare($queue = $this->queueName(), false, true, false, false, false, [
+        $channel->queue_declare($queue, false, true, false, false, false, $typed([
             'x-dead-letter-exchange' => ['S', $retryExchange],
             'x-dead-letter-routing-key' => ['S', $queue],
-        ]);
-        $channel->queue_declare($retryQueue, false, true, false, false, false, [
+        ]));
+        $this->declareRetryQueue($channel, $retryQueue, $typed([
             'x-message-ttl' => ['I', (int) ($retry['delay'] ?? 0)],
-            'x-dead-letter-exchange' => ['S', $config->exchange],
-            'x-dead-letter-routing-key' => ['S', $routingKey],
-        ]);
-        $channel->queue_declare($errorQueue, false, true, false, false, false);
+            // Default exchange: routes by queue name, straight back to this worker only.
+            'x-dead-letter-exchange' => ['S', ''],
+            'x-dead-letter-routing-key' => ['S', $queue],
+        ]));
+        $channel->queue_declare($errorQueue, false, true, false, false, false, $typed([]));
 
         foreach ($routingKeys as $key) {
             $channel->queue_bind($queue, $config->exchange, $key);
         }
         $channel->queue_bind($retryQueue, $retryExchange, $queue);
         $channel->queue_bind($errorQueue, $errorExchange, $queue);
+    }
+
+    /**
+     * The retry queue's arguments change when the retry delay changes (and they
+     * changed between Mirabel versions). RabbitMQ refuses to redeclare a queue
+     * with different arguments, so an empty retry queue is recreated; one that
+     * still holds messages is left alone and reported.
+     */
+    private function declareRetryQueue(object $channel, string $retryQueue, array $arguments): void
+    {
+        $connection = $channel->getConnection();
+        $probe = $connection->channel();
+
+        try {
+            $probe->queue_declare($retryQueue, false, true, false, false, false, $arguments);
+
+            return;
+        } catch (AMQPProtocolChannelException $exception) {
+            if ($exception->getCode() !== 406) {
+                throw $exception;
+            }
+        } finally {
+            QuietClose::all($probe);
+        }
+
+        $repair = $connection->channel();
+        try {
+            $repair->queue_delete($retryQueue, false, true);
+            $repair->queue_declare($retryQueue, false, true, false, false, false, $arguments);
+            $this->logger()->warning('RabbitMQ retry queue recreated with new arguments.', [
+                'worker' => static::class,
+                'queue' => $retryQueue,
+            ]);
+        } catch (AMQPProtocolChannelException $exception) {
+            throw new TopologyException(sprintf(
+                'Retry queue "%s" exists with different arguments and still holds messages. '
+                . 'Let it drain (or move its messages) and delete it; the worker will recreate it.',
+                $retryQueue,
+            ), 0, $exception);
+        } finally {
+            QuietClose::all($repair);
+        }
+    }
+
+    /**
+     * PRECONDITION_FAILED (406) and ACCESS_REFUSED (403) mean the topology or
+     * the permissions are wrong. They are configuration errors, not outages.
+     */
+    private static function isConfigurationError(\Throwable $exception): bool
+    {
+        if ($exception instanceof TopologyException) {
+            return true;
+        }
+
+        return ($exception instanceof AMQPProtocolChannelException
+                || $exception instanceof \PhpAmqpLib\Exception\AMQPProtocolConnectionException)
+            && in_array($exception->getCode(), [403, 406], true);
     }
 
     private function process(object $channel, ConnectionConfig $config, string $errorExchange, AMQPMessage $message, array $retry, string $queue): void
@@ -254,6 +376,7 @@ abstract class Worker
         $this->activeRetry = $retry;
         $idempotencyStore = $this->idempotencyStore();
         $idempotencyKey = $this->idempotencyKey($message);
+        $envelope = null;
 
         try {
             if ($idempotencyStore !== null && $idempotencyKey !== '' && $idempotencyStore->has($idempotencyKey)) {
@@ -272,12 +395,30 @@ abstract class Worker
                 return;
             }
 
-            $result = null;
             if (method_exists($this, 'work')) {
                 $result = $this->work($message);
             } else {
-                $body = (new JsonSerializer())->decode($message->getBody());
-                $this->handle(new Envelope($channel, $message, $body));
+                try {
+                    $body = $this->serializer()->decode($message->getBody());
+                } catch (\JsonException $exception) {
+                    // A body that cannot be decoded will never succeed: park it now.
+                    $this->fail($message, false, 'poison', $exception);
+
+                    return;
+                }
+
+                $envelope = new Envelope(
+                    $channel,
+                    $message,
+                    $body,
+                    $this->attempts($message, $queue),
+                    fn (AMQPMessage $failed, bool $retryable) => $this->fail($failed, $retryable, $retryable ? 'nack' : 'reject'),
+                );
+                $this->handle($envelope);
+                if (!$envelope->isResponded()) {
+                    $envelope->ack();
+                }
+                $result = $envelope->response();
             }
 
             if ($idempotencyStore !== null && $idempotencyKey !== '' && !in_array($result, ['nack', 'reject'], true)) {
@@ -291,42 +432,92 @@ abstract class Worker
                 'result' => $result,
             ]);
         } catch (\Throwable $exception) {
-            if ($this->attempts($message, $queue) >= (int) ($retry['max_attempts'] ?? 1)) {
-                $channel->basic_publish($message, $errorExchange, $queue);
-                $message->ack();
-                $this->logger()->error('RabbitMQ message sent to the error queue.', [
+            if ($envelope !== null && $envelope->isResponded()) {
+                // The handler already answered the broker; a second answer would close the channel.
+                $this->logger()->error('RabbitMQ handler failed after responding to the message.', [
                     'worker' => static::class,
                     'queue' => $queue,
+                    'response' => $envelope->response(),
                     'exception' => $exception,
-                ]);
-                $this->recordTelemetry('message_sent_to_error_queue', [
-                    'worker' => static::class,
-                    'queue' => $queue,
-                    'attempt' => $this->attempts($message, $queue),
-                    'error_exchange' => $errorExchange,
                 ]);
 
                 return;
             }
 
-            $message->nack(false, false);
-            $this->logger()->warning('RabbitMQ message sent to retry.', [
-                'worker' => static::class,
-                'queue' => $queue,
-                'attempt' => $this->attempts($message, $queue),
-                'exception' => $exception,
-            ]);
-            $this->recordTelemetry('message_retried', [
-                'worker' => static::class,
-                'queue' => $queue,
-                'attempt' => $this->attempts($message, $queue),
-            ]);
+            $this->fail($message, true, 'exception', $exception);
         } finally {
             $this->activeChannel = null;
             $this->activeErrorExchange = null;
             $this->activeQueue = null;
             $this->activeRetry = [];
         }
+    }
+
+    /**
+     * Routes a failed message: retryable failures go to the retry queue until
+     * max_attempts is reached; everything else is parked in the error queue
+     * with headers explaining why.
+     */
+    private function fail(AMQPMessage $message, bool $retryable, string $reason, ?\Throwable $exception = null): void
+    {
+        $queue = (string) $this->activeQueue;
+        $attempt = $this->attempts($message, $queue);
+        $maxAttempts = (int) ($this->activeRetry['max_attempts'] ?? 1);
+
+        if ($retryable && $attempt < $maxAttempts) {
+            $message->nack(false, false);
+            $this->logger()->warning('RabbitMQ message sent to retry.', [
+                'worker' => static::class,
+                'queue' => $queue,
+                'attempt' => $attempt,
+                'exception' => $exception,
+            ]);
+            $this->recordTelemetry('message_retried', [
+                'worker' => static::class,
+                'queue' => $queue,
+                'attempt' => $attempt,
+            ]);
+
+            return;
+        }
+
+        $this->activeChannel->basic_publish(
+            $this->withFailureHeaders($message, $reason, $attempt, $exception),
+            (string) $this->activeErrorExchange,
+            $queue,
+        );
+        $message->ack();
+        $this->logger()->error('RabbitMQ message sent to the error queue.', [
+            'worker' => static::class,
+            'queue' => $queue,
+            'reason' => $reason,
+            'attempt' => $attempt,
+            'exception' => $exception,
+        ]);
+        $this->recordTelemetry('message_sent_to_error_queue', [
+            'worker' => static::class,
+            'queue' => $queue,
+            'reason' => $reason,
+            'attempt' => $attempt,
+            'error_exchange' => $this->activeErrorExchange,
+        ]);
+    }
+
+    private function withFailureHeaders(AMQPMessage $message, string $reason, int $attempt, ?\Throwable $exception): AMQPMessage
+    {
+        $properties = $message->get_properties();
+        $headers = isset($properties['application_headers']) && method_exists($properties['application_headers'], 'getNativeData')
+            ? $properties['application_headers']->getNativeData()
+            : [];
+        $headers['x-mirabel-failure-reason'] = $reason;
+        $headers['x-mirabel-attempts'] = $attempt;
+        $headers['x-mirabel-failed-at'] = time();
+        if ($exception !== null) {
+            $headers['x-mirabel-exception'] = $exception::class . ': ' . substr($exception->getMessage(), 0, 500);
+        }
+        $properties['application_headers'] = new AMQPTable($headers);
+
+        return new AMQPMessage($message->getBody(), $properties);
     }
 
     private function attempts(AMQPMessage $message, string $queue): int
@@ -365,10 +556,19 @@ abstract class Worker
         return $message->has('message_id') ? (string) $message->get('message_id') : '';
     }
 
+    private function recordTelemetry(string $event, array $context = []): void
+    {
+        TelemetryRuntime::record($event, $context, $this->logger());
+    }
+
     private function queueName(): string
     {
         if (defined(static::class . '::QUEUE')) {
             return (string) constant(static::class . '::QUEUE');
+        }
+
+        if (!isset(static::$queue) || static::$queue === '') {
+            throw new \LogicException(sprintf('Worker %s must declare "public static string $queue".', static::class));
         }
 
         return static::$queue;

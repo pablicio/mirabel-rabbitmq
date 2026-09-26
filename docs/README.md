@@ -86,6 +86,8 @@ MB_RABBITMQ_HEARTBEAT=30
 MB_RABBITMQ_RECONNECT_ATTEMPTS=0
 MB_RABBITMQ_RECONNECT_DELAY_MS=1000
 MB_RABBITMQ_RECONNECT_MAX_DELAY_MS=30000
+MB_RABBITMQ_PUBLISH_RETRIES=3
+MB_RABBITMQ_REUSE_CONNECTION=false
 ```
 
 Valores padrão:
@@ -103,9 +105,11 @@ Valores padrão:
 | `MB_RABBITMQ_CONNECT_TIMEOUT` | `3` | Timeout de conexão em segundos |
 | `MB_RABBITMQ_READ_WRITE_TIMEOUT` | `3` | Timeout de leitura/escrita em segundos |
 | `MB_RABBITMQ_HEARTBEAT` | `30` | Heartbeat AMQP em segundos; `0` desativa |
-| `MB_RABBITMQ_RECONNECT_ATTEMPTS` | `0` | Tentativas após falha; `0` significa ilimitadas |
+| `MB_RABBITMQ_RECONNECT_ATTEMPTS` | `0` | Reconexões do **worker** após falha; `0` significa ilimitadas |
 | `MB_RABBITMQ_RECONNECT_DELAY_MS` | `1000` | Backoff inicial em milissegundos |
 | `MB_RABBITMQ_RECONNECT_MAX_DELAY_MS` | `30000` | Limite do backoff |
+| `MB_RABBITMQ_PUBLISH_RETRIES` | `3` | Novas tentativas de `publish()` após falha de transporte; `0` desativa |
+| `MB_RABBITMQ_REUSE_CONNECTION` | `false` | Reaproveita conexão e canal entre publicações do mesmo processo |
 
 Porta inválida ou exchange vazio geram `InvalidArgumentException` ao criar a
 configuração.
@@ -181,12 +185,22 @@ Com confirmações habilitadas:
 MB_RABBITMQ_PUBLISHER_CONFIRMS=true
 ```
 
-O canal executa `confirm_select()` e espera os confirms pendentes antes de
-fechar a conexão.
+O canal executa `confirm_select()` e espera a resposta do broker por até
+`MB_RABBITMQ_READ_WRITE_TIMEOUT` segundos. Se o broker responder `basic.nack`,
+`publish()` lança `Mirabel\RabbitMQ\Exception\PublishNotConfirmedException`
+(depois das novas tentativas). Sem confirms, `publish()` retorna assim que os
+bytes saem pelo socket — a mensagem pode se perder se o broker cair em seguida.
 
 Se a conexão ou o canal falhar durante a publicação, o publisher recria os
-recursos e tenta novamente usando `MB_RABBITMQ_RECONNECT_*`. Falhas de
-serialização do payload não são repetidas, pois não são falhas de transporte.
+recursos e tenta de novo até `MB_RABBITMQ_PUBLISH_RETRIES` vezes, com o backoff
+de `MB_RABBITMQ_RECONNECT_DELAY_MS`. O limite é separado do worker de propósito:
+um worker pode tentar reconectar para sempre, mas uma publicação feita dentro de
+uma requisição HTTP não pode segurar a resposta indefinidamente. O `message_id`
+é o mesmo em todas as tentativas. Falhas de serialização do payload não são
+repetidas, pois não são falhas de transporte.
+
+Um evento sem `public static string $routingKey` e sem routing key na chamada
+lança `LogicException` explicando o que falta.
 
 ## Consumindo mensagens
 
@@ -239,10 +253,10 @@ Para iniciar o consumidor:
 mantém disponíveis:
 
 ```php
-$this->ack($msg);                // confirma e remove a mensagem
-$this->nack($msg);               // encaminha para retry ou error
-$this->nack($msg, requeue: true); // requeue explícito
-$this->reject($msg);             // rejeita a mensagem
+$this->ack($msg);                 // confirma e remove a mensagem
+$this->nack($msg);                // falha temporária: retry, ou error na última tentativa
+$this->nack($msg, requeue: true); // devolve para a mesma fila, sem atraso nem contagem
+$this->reject($msg);              // falha permanente: direto para a fila error
 ```
 
 Os nomes das constantes são compatíveis com a API clássica e podem ser
@@ -271,10 +285,22 @@ final class OrderWorker extends Worker
     public function handle(Envelope $envelope): void
     {
         process($envelope->body);
-        $envelope->ack();
     }
 }
 ```
+
+O contrato do `handle()` é curto:
+
+| O handler... | O Worker faz |
+| --- | --- |
+| retorna normalmente | `ack` automático (se o handler não respondeu antes) |
+| lança exceção | retry; na última tentativa, fila error |
+| chama `$envelope->nack()` | retry; na última tentativa, fila error |
+| chama `$envelope->reject()` | fila error imediatamente, sem gastar tentativas |
+| lança exceção **depois** de `ack()` | registra o erro; não responde ao broker de novo |
+
+Uma mensagem cujo corpo não é JSON válido nunca chega ao `handle()`: ela é
+enviada direto para a fila error (mensagem envenenada).
 
 O `Envelope` fornece:
 
@@ -286,6 +312,8 @@ $envelope->type;
 $envelope->timestamp;
 $envelope->idempotencyKey;
 $envelope->schemaVersion;
+$envelope->attempt;     // 1 na primeira entrega, 2 no primeiro retry...
+$envelope->isRedelivered();
 $envelope->ack();
 $envelope->nack();
 $envelope->reject();
@@ -293,6 +321,18 @@ $envelope->reject();
 
 Uma classe deve implementar `work()` ou sobrescrever `handle()`. Se nenhuma
 forma for implementada, o Worker lança `LogicException` ao processar a mensagem.
+
+### Quorum queues
+
+Para filas replicadas num cluster, declare o tipo nas opções do worker:
+
+```php
+public static array $options = ['queue_type' => 'quorum'];
+```
+
+A fila, a `.retry` e a `.error` são criadas como quorum queues. Uma fila que
+já existe com outro tipo não muda: o broker responde `PRECONDITION_FAILED`, e o
+worker para com esse erro em vez de tentar reconectar.
 
 ## Retry e fila de erro
 
@@ -307,15 +347,33 @@ orders.received.error
 O fluxo é:
 
 ```text
-fila normal --nack--> fila retry --TTL/DLX--> fila normal
-fila normal --limite atingido--> exchange error -> fila error
+fila normal --nack--> fila retry --TTL/DLX--> exchange padrão --> fila normal
+fila normal --limite atingido / reject / JSON inválido--> exchange error -> fila error
 ```
 
 A fila retry recebe:
 
-- `x-message-ttl` a partir de `retry_options['x-message-ttl']`;
-- `x-dead-letter-exchange` apontando para o exchange principal;
-- `x-dead-letter-routing-key` apontando para a primeira routing key.
+- `x-message-ttl` a partir de `$retry['delay']` (ou `retry_options['x-message-ttl']`);
+- `x-dead-letter-exchange` vazio — o *default exchange*, que roteia pelo nome da fila;
+- `x-dead-letter-routing-key` com o nome da fila normal.
+
+Por isso uma mensagem em retry volta **só** para a fila do worker que falhou.
+Até a versão anterior ela voltava pelo exchange principal com a routing key do
+evento, e era entregue de novo a todas as outras filas ligadas àquela chave.
+
+Quando os argumentos da fila retry mudam (outra versão da biblioteca, outro
+`delay`), o RabbitMQ recusa redeclarar a fila com `PRECONDITION_FAILED`. O
+Worker trata isso: se a fila retry estiver vazia, ele a apaga e recria; se ainda
+tiver mensagens, ele para com uma mensagem explicando que é preciso esvaziá-la.
+
+Uma mensagem que vai para a fila error carrega headers com o motivo:
+
+| Header | Conteúdo |
+| --- | --- |
+| `x-mirabel-failure-reason` | `exception`, `nack`, `reject` ou `poison` |
+| `x-mirabel-attempts` | tentativa em que falhou |
+| `x-mirabel-failed-at` | timestamp Unix |
+| `x-mirabel-exception` | classe e mensagem da exceção, quando houver |
 
 A fila normal recebe:
 
@@ -344,33 +402,36 @@ A biblioteca não promete exactly-once delivery.
 
 ## Testes
 
-Teste unitário padrão:
+Suíte unitária, sem broker:
 
 ```bash
-vendor/bin/phpunit
+composer test
 ```
 
-A suíte normal não exige RabbitMQ. O teste de publicação utiliza uma fábrica de
-conexão fake e verifica exchange, routing key e JSON.
+Ela usa fábricas de conexão fake e cobre publicação, confirms, novas tentativas,
+roteamento de falhas (retry, error, reject, JSON inválido) e o `ack` automático.
 
 ### Teste de integração
 
-O teste real de retry/DLX é opt-in:
+Os testes de integração rodam o `Worker` de verdade contra um RabbitMQ real:
 
 ```bash
-MIRABEL_RABBITMQ_INTEGRATION=1 \
-  vendor/bin/phpunit tests/Integration/RabbitMqRetryTest.php
+docker compose up -d
+composer test:integration
 ```
 
 No Windows PowerShell:
 
 ```powershell
+docker compose up -d
 $env:MIRABEL_RABBITMQ_INTEGRATION = "1"
-vendor/bin/phpunit tests/Integration/RabbitMqRetryTest.php
+vendor/bin/phpunit
 ```
 
-O teste cria exchanges e filas exclusivas com nomes aleatórios e verifica o
-header `x-death` depois do retorno da mensagem pela fila TTL.
+Cada teste cria exchanges e filas com nomes aleatórios e apaga tudo ao final.
+Eles verificam o caminho feliz, que o retry não vaza para outras filas, a fila
+error com os headers de falha, a mensagem envenenada e a migração da fila retry.
+O CI (`.github/workflows/ci.yml`) roda as duas suítes em PHP 8.2, 8.3 e 8.4.
 
 ## Uso com Laravel
 
@@ -388,9 +449,15 @@ Para processos de longa duração, prefira um Artisan Command dedicado ou um
 processo supervisionado em vez de executar `subscribe()` manualmente em um
 Tinker de produção.
 
-O Worker tenta reconectar após falhas de conexão usando backoff exponencial.
-Quando `pcntl` está disponível, `SIGTERM` e `SIGINT` solicitam o encerramento
-do loop após a tentativa atual.
+O Worker tenta reconectar após falhas de conexão usando backoff exponencial. O
+contador de tentativas volta a zero depois de uma conexão bem-sucedida, então
+`MB_RABBITMQ_RECONNECT_ATTEMPTS` limita quedas seguidas, não quedas ao longo da
+vida do processo.
+
+`$worker->stop()` pede o encerramento: o Worker termina a mensagem em mãos e
+sai de `subscribe()` em até um segundo. Quando `pcntl` está disponível,
+`SIGTERM` e `SIGINT` chamam `stop()`. `$worker->health()` informa se o
+consumidor está de fato conectado.
 
 O projeto de exemplo em
 `C:\projetos\IA\laravel-microservices-mirabel-rabbitmq` usa um Composer `path`
@@ -533,11 +600,17 @@ Ainda não fazem parte do Core atual:
 
 - múltiplas conexões nomeadas;
 - TLS configurável;
-- serializer customizável por evento/worker;
 - schema validation;
-- quorum queues, priority queues e single active consumer como opções de alto nível;
-- pool de conexões ou reutilização entre publicações;
-- pacote Laravel separado.
+- priority queues e single active consumer como opções de alto nível;
+- mais de um host na configuração (para um cluster, use um balanceador ou um
+  nome de DNS na frente dos nós);
+- pacote Laravel separado;
+- `mandatory` + return listener (hoje, uma mensagem sem nenhuma fila ligada à
+  routing key é descartada pelo broker em silêncio, mesmo com confirms).
+
+O serializer pode ser trocado sobrescrevendo `serializer()` no evento ou worker.
+Publicações de alto volume num mesmo processo podem reaproveitar a conexão com
+`MB_RABBITMQ_REUSE_CONNECTION=true`.
 
 Esses itens devem ser adicionados preservando a API clássica e mantendo a
 camada Core independente de framework.

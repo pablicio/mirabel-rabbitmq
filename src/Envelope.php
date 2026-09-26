@@ -17,10 +17,20 @@ final class Envelope
     public readonly string $idempotencyKey;
     public readonly int $schemaVersion;
 
+    private ?string $response = null;
+
+    /**
+     * @param \Closure(AMQPMessage, bool): void|null $nackPolicy applied on
+     *        nack()/reject() without requeue. The Worker uses it to route the
+     *        message: nack goes to retry (or to the error queue on the last
+     *        attempt); reject goes straight to the error queue.
+     */
     public function __construct(
         private readonly AMQPChannel $channel,
         private readonly AMQPMessage $message,
         mixed $body,
+        public readonly int $attempt = 1,
+        private readonly ?\Closure $nackPolicy = null,
     ) {
         $this->body = $body;
         $this->messageId = $message->has('message_id') ? (string) $message->get('message_id') : '';
@@ -33,17 +43,58 @@ final class Envelope
 
     public function ack(): void
     {
-        $this->channel->basic_ack($this->message->getDeliveryTag());
+        $this->message->ack();
+        $this->response = 'ack';
     }
 
+    /**
+     * Temporary failure. Without requeue the message waits in the worker's
+     * retry queue (or goes to the error queue on the last attempt). With
+     * requeue it goes back to the same queue immediately, with no delay.
+     */
     public function nack(bool $requeue = false): void
     {
-        $this->channel->basic_nack($this->message->getDeliveryTag(), false, $requeue);
+        if (!$requeue && $this->nackPolicy !== null) {
+            ($this->nackPolicy)($this->message, true);
+        } else {
+            $this->message->nack($requeue);
+        }
+        $this->response = 'nack';
     }
 
+    /**
+     * Permanent failure: the message can never succeed (invalid payload,
+     * unknown schema). Without requeue it goes straight to the error queue.
+     */
     public function reject(bool $requeue = false): void
     {
-        $this->channel->basic_reject($this->message->getDeliveryTag(), $requeue);
+        if (!$requeue && $this->nackPolicy !== null) {
+            ($this->nackPolicy)($this->message, false);
+        } else {
+            $this->message->reject($requeue);
+        }
+        $this->response = 'reject';
+    }
+
+    /** 'ack', 'nack', 'reject' or null while the handler has not answered yet. */
+    public function response(): ?string
+    {
+        return $this->response;
+    }
+
+    public function isResponded(): bool
+    {
+        return $this->response !== null;
+    }
+
+    public function isRedelivered(): bool
+    {
+        return (bool) $this->message->isRedelivered();
+    }
+
+    public function message(): AMQPMessage
+    {
+        return $this->message;
     }
 
     private function idempotencyKey(AMQPMessage $message): string

@@ -38,6 +38,27 @@ final class OutboxTest extends TestCase
         self::assertSame([], $store->published);
         self::assertArrayHasKey('message-2', $store->failed);
     }
+
+    public function testMessageSurvivesAJsonRoundTripWithHeaders(): void
+    {
+        $original = new OutboxMessage('message-3', 'events', 'orders.paid', '{"id":3}', [
+            'delivery_mode' => 2,
+            'application_headers' => new \PhpAmqpLib\Wire\AMQPTable([
+                'x-idempotency-key' => 'order-3',
+                'x-schema-version' => 2,
+            ]),
+        ]);
+
+        $stored = json_decode(json_encode($original->toArray(), JSON_THROW_ON_ERROR), true);
+        $restored = OutboxMessage::fromArray($stored);
+
+        self::assertSame('orders.paid', $restored->routingKey);
+        self::assertSame(2, $restored->properties['delivery_mode']);
+        self::assertSame(
+            ['x-idempotency-key' => 'order-3', 'x-schema-version' => 2],
+            $restored->properties['application_headers']->getNativeData(),
+        );
+    }
 }
 
 final class OutboxStoreForTest implements OutboxStoreInterface

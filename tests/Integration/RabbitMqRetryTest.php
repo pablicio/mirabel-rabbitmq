@@ -12,6 +12,8 @@ use PHPUnit\Framework\TestCase;
 final class RabbitMqRetryTest extends TestCase
 {
     private ?AMQPStreamConnection $connection = null;
+    /** @var list<string> */
+    private array $exchanges = [];
 
     protected function setUp(): void
     {
@@ -23,8 +25,14 @@ final class RabbitMqRetryTest extends TestCase
     protected function tearDown(): void
     {
         if ($this->connection !== null) {
+            $channel = $this->connection->channel();
+            foreach ($this->exchanges as $exchange) {
+                $channel->exchange_delete($exchange);
+            }
+            $channel->close();
             $this->connection->close();
         }
+        putenv('MB_RABBITMQ_EXCHANGE');
     }
 
     public function testMessageReturnsFromRetryQueueWithXDeathMetadata(): void
@@ -48,6 +56,7 @@ final class RabbitMqRetryTest extends TestCase
 
         $channel->exchange_declare($exchange, 'topic', false, true, false);
         $channel->exchange_declare($retryExchange, 'topic', false, true, false);
+        $this->exchanges = [$exchange, $retryExchange];
         $channel->queue_declare($queue, false, false, true, false, false, [
             'x-dead-letter-exchange' => ['S', $retryExchange],
             'x-dead-letter-routing-key' => ['S', $queue],

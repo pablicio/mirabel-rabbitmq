@@ -23,6 +23,7 @@ final class ConnectionConfig
         public readonly int $reconnectAttempts = 0,
         public readonly int $reconnectDelayMs = 1000,
         public readonly int $reconnectMaxDelayMs = 30000,
+        public readonly int $publishRetries = 3,
     ) {
         if ($this->port < 1 || $this->port > 65535) {
             throw new InvalidArgumentException('RabbitMQ port must be between 1 and 65535.');
@@ -38,6 +39,7 @@ final class ConnectionConfig
 
         if ($this->heartbeat < 0 || $this->reconnectAttempts < 0
             || $this->reconnectDelayMs < 0 || $this->reconnectMaxDelayMs < $this->reconnectDelayMs
+            || $this->publishRetries < 0
         ) {
             throw new InvalidArgumentException('RabbitMQ heartbeat and reconnect values are invalid.');
         }
@@ -60,6 +62,18 @@ final class ConnectionConfig
             reconnectAttempts: self::integer('MB_RABBITMQ_RECONNECT_ATTEMPTS', 0),
             reconnectDelayMs: self::integer('MB_RABBITMQ_RECONNECT_DELAY_MS', 1000),
             reconnectMaxDelayMs: self::integer('MB_RABBITMQ_RECONNECT_MAX_DELAY_MS', 30000),
+            publishRetries: self::integer('MB_RABBITMQ_PUBLISH_RETRIES', 3),
+        );
+    }
+
+    /**
+     * Exponential backoff for the given attempt (1-based), capped by reconnectMaxDelayMs.
+     */
+    public function backoffDelayMs(int $attempt): int
+    {
+        return min(
+            $this->reconnectMaxDelayMs,
+            $this->reconnectDelayMs * (2 ** min(max($attempt, 1) - 1, 10)),
         );
     }
 

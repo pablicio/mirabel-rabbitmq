@@ -7,6 +7,7 @@ namespace Mirabel\RabbitMQ\Tests;
 use Mirabel\RabbitMQ\Connection\ConnectionFactoryInterface;
 use Mirabel\RabbitMQ\ConnectionConfig;
 use Mirabel\RabbitMQ\Event;
+use Mirabel\RabbitMQ\Exception\PublishNotConfirmedException;
 use Mirabel\RabbitMQ\Publishing\PublisherRuntime;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AbstractConnection;
@@ -18,10 +19,12 @@ final class EventTest extends TestCase
     protected function tearDown(): void
     {
         PublisherRuntime::closeAll();
-        foreach (['EXCHANGE', 'EXCHANGE_TYPE'] as $name) {
+        foreach ([
+            'EXCHANGE', 'EXCHANGE_TYPE', 'REUSE_CONNECTION', 'PUBLISHER_CONFIRMS', 'PUBLISH_RETRIES',
+            'RECONNECT_ATTEMPTS', 'RECONNECT_DELAY_MS', 'RECONNECT_MAX_DELAY_MS',
+        ] as $name) {
             putenv('MB_RABBITMQ_' . $name);
         }
-        putenv('MB_RABBITMQ_REUSE_CONNECTION');
     }
 
     public function testPublishesJsonThroughTheInjectedConnection(): void
@@ -178,6 +181,86 @@ final class EventTest extends TestCase
         (new TestEvent($factory, ['id' => 2]))->publish(messageId: 'event-2');
         PublisherRuntime::closeAll();
     }
+
+    public function testPublishRetriesAreBoundedEvenWhenWorkersReconnectForever(): void
+    {
+        putenv('MB_RABBITMQ_RECONNECT_ATTEMPTS=0');
+        putenv('MB_RABBITMQ_RECONNECT_DELAY_MS=0');
+        putenv('MB_RABBITMQ_RECONNECT_MAX_DELAY_MS=0');
+        putenv('MB_RABBITMQ_PUBLISH_RETRIES=2');
+
+        $factory = new FailingConnectionFactory();
+
+        try {
+            (new TestEvent($factory, ['id' => 1]))->publish();
+            self::fail('Publishing to an unreachable broker must fail.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('broker down', $exception->getMessage());
+        }
+
+        self::assertSame(3, $factory->calls);
+    }
+
+    public function testNackedPublisherConfirmIsReportedAsFailure(): void
+    {
+        putenv('MB_RABBITMQ_PUBLISHER_CONFIRMS=true');
+        putenv('MB_RABBITMQ_PUBLISH_RETRIES=0');
+
+        $nackHandler = null;
+        $channel = $this->getMockBuilder(AMQPChannel::class)->disableOriginalConstructor()->getMock();
+        $channel->expects(self::once())->method('confirm_select');
+        $channel->method('set_nack_handler')->willReturnCallback(static function (callable $handler) use (&$nackHandler): void {
+            $nackHandler = $handler;
+        });
+        $channel->method('wait_for_pending_acks')->willReturnCallback(static function () use (&$nackHandler): void {
+            $nackHandler(new AMQPMessage('{}'));
+        });
+
+        $connection = $this->getMockBuilder(AbstractConnection::class)->disableOriginalConstructor()->getMock();
+        $connection->method('channel')->willReturn($channel);
+
+        $this->expectException(PublishNotConfirmedException::class);
+        (new TestEvent(new StubConnectionFactory($connection), ['id' => 1]))->publish();
+    }
+
+    public function testCloseFailureDoesNotHideTheOriginalError(): void
+    {
+        putenv('MB_RABBITMQ_PUBLISH_RETRIES=0');
+
+        $channel = $this->getMockBuilder(AMQPChannel::class)->disableOriginalConstructor()->getMock();
+        $channel->method('basic_publish')->willThrowException(new \RuntimeException('socket closed while publishing'));
+        $channel->method('close')->willThrowException(new \RuntimeException('cannot close a broken channel'));
+
+        $connection = $this->getMockBuilder(AbstractConnection::class)->disableOriginalConstructor()->getMock();
+        $connection->method('channel')->willReturn($channel);
+        $connection->method('close')->willThrowException(new \RuntimeException('cannot close a broken connection'));
+
+        $this->expectExceptionMessage('socket closed while publishing');
+        (new TestEvent(new StubConnectionFactory($connection), ['id' => 1]))->publish();
+    }
+
+    public function testEventWithoutRoutingKeyExplainsWhatIsMissing(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('public static string $routingKey');
+
+        (new EventWithoutRoutingKey(['id' => 1]))->toOutboxMessage();
+    }
+}
+
+final class FailingConnectionFactory implements ConnectionFactoryInterface
+{
+    public int $calls = 0;
+
+    public function connect(ConnectionConfig $config): AbstractConnection
+    {
+        $this->calls++;
+        throw new \RuntimeException('broker down');
+    }
+}
+
+final class EventWithoutRoutingKey extends Event
+{
 }
 
 final class StubConnectionFactory implements ConnectionFactoryInterface
