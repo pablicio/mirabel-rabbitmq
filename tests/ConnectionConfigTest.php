@@ -10,10 +10,26 @@ use PHPUnit\Framework\TestCase;
 
 final class ConnectionConfigTest extends TestCase
 {
+    private const VARIABLES = ['HOST', 'PORT', 'PUBLISHER_CONFIRMS'];
+
+    /** @var array<string, string|false> */
+    private array $original = [];
+
+    protected function setUp(): void
+    {
+        foreach (self::VARIABLES as $name) {
+            $this->original[$name] = getenv('MB_RABBITMQ_' . $name);
+        }
+    }
+
     protected function tearDown(): void
     {
-        foreach (['HOST', 'PORT', 'PUBLISHER_CONFIRMS'] as $name) {
-            putenv('MB_RABBITMQ_' . $name);
+        // Restore, not unset: the integration suite runs in the same
+        // process and needs the broker address it was started with.
+        foreach ($this->original as $name => $value) {
+            putenv($value === false
+                ? 'MB_RABBITMQ_' . $name
+                : 'MB_RABBITMQ_' . $name . '=' . $value);
         }
     }
 
