@@ -141,12 +141,21 @@ abstract class Event
         );
     }
 
+    /**
+     * The routing key publish() uses: the ROUTING_KEY constant, the static
+     * $routingKey property, or the class name ("PedidoPago" → "pedido.pago").
+     */
+    public static function routingKey(): string
+    {
+        return Convention::routingKey(static::class);
+    }
+
     private static function defaultRoutingKey(): string
     {
-        $routingKey = isset(static::$routingKey) ? static::$routingKey : '';
+        $routingKey = static::routingKey();
         if ($routingKey === '') {
             throw new LogicException(sprintf(
-                'Event %s must declare "public static string $routingKey" or receive a routing key in publish().',
+                'Event %s has no routing key: declare const ROUTING_KEY or pass one to publish().',
                 static::class,
             ));
         }

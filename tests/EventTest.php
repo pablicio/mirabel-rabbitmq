@@ -239,12 +239,11 @@ final class EventTest extends TestCase
         (new TestEvent(new StubConnectionFactory($connection), ['id' => 1]))->publish();
     }
 
-    public function testEventWithoutRoutingKeyExplainsWhatIsMissing(): void
+    public function testEventWithoutRoutingKeyIsNamedAfterItsClass(): void
     {
-        $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('public static string $routingKey');
+        $message = (new EventWithoutRoutingKey(['id' => 1]))->toOutboxMessage();
 
-        (new EventWithoutRoutingKey(['id' => 1]))->toOutboxMessage();
+        self::assertSame('event.without.routing.key', $message->routingKey);
     }
 }
 

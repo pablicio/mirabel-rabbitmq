@@ -561,48 +561,39 @@ abstract class Worker
         TelemetryRuntime::record($event, $context, $this->logger());
     }
 
+    /**
+     * What this worker will declare and consume, after the constants,
+     * the static properties and the conventions are resolved.
+     *
+     * @return array{queue: string, routing_keys: list<string>, retry: array{delay: int, max_attempts: int}, options: array<string, mixed>}
+     */
+    public static function definition(): array
+    {
+        return [
+            'queue' => Convention::queue(static::class),
+            'routing_keys' => Convention::routingKeys(static::class),
+            'retry' => Convention::retry(static::class),
+            'options' => Convention::options(static::class),
+        ];
+    }
+
     private function queueName(): string
     {
-        if (defined(static::class . '::QUEUE')) {
-            return (string) constant(static::class . '::QUEUE');
-        }
-
-        if (!isset(static::$queue) || static::$queue === '') {
-            throw new \LogicException(sprintf('Worker %s must declare "public static string $queue".', static::class));
-        }
-
-        return static::$queue;
+        return Convention::queue(static::class);
     }
 
     private function routingKeys(): array
     {
-        if (defined(static::class . '::routing_keys')) {
-            return (array) constant(static::class . '::routing_keys');
-        }
-
-        return static::$routingKeys;
+        return Convention::routingKeys(static::class);
     }
 
     private function options(): array
     {
-        if (defined(static::class . '::options')) {
-            return (array) constant(static::class . '::options');
-        }
-
-        return static::$options;
+        return Convention::options(static::class);
     }
 
     private function retrySettings(): array
     {
-        if (defined(static::class . '::retry_options')) {
-            $legacy = (array) constant(static::class . '::retry_options');
-
-            return [
-                'delay' => (int) ($legacy['x-message-ttl'] ?? 0),
-                'max_attempts' => (int) ($legacy['max-attempts'] ?? 1),
-            ];
-        }
-
-        return static::$retry;
+        return Convention::retry(static::class);
     }
 }
