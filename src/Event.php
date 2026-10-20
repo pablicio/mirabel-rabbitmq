@@ -18,7 +18,6 @@ use Mirabel\RabbitMQ\Serialization\SerializerInterface;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
 use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
 
 abstract class Event
 {
@@ -36,7 +35,7 @@ abstract class Event
 
     protected function logger(): LoggerInterface
     {
-        return new NullLogger();
+        return Mirabel::logger();
     }
 
     protected function serializer(): SerializerInterface

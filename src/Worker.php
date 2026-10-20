@@ -17,7 +17,6 @@ use PhpAmqpLib\Exception\AMQPTimeoutException;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
 use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
 
 /**
  * Topology declared for a worker whose queue is "orders":
@@ -57,7 +56,7 @@ abstract class Worker
 
     protected function logger(): LoggerInterface
     {
-        return new NullLogger();
+        return Mirabel::logger();
     }
 
     protected function idempotencyStore(): ?IdempotencyStoreInterface
