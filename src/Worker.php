@@ -135,6 +135,26 @@ abstract class Worker
     }
 
     /**
+     * Declares the worker's queues, exchanges and bindings, and leaves. Until
+     * the queue exists, an event published with its routing key has nowhere
+     * to go and is dropped by the broker; declaring at deploy time, before
+     * the first publish, closes that window.
+     */
+    public function declare(): void
+    {
+        $config = ConnectionConfig::fromEnvironment();
+        $connection = $this->connectionFactory()->connect($config);
+        $channel = null;
+
+        try {
+            $channel = $connection->channel();
+            $this->declareFor($channel, $config);
+        } finally {
+            QuietClose::all($channel, $connection);
+        }
+    }
+
+    /**
      * Asks the worker to finish the message in hand and leave subscribe().
      * Safe to call from handle()/work() or from a signal handler.
      */
@@ -212,15 +232,7 @@ abstract class Worker
 
         try {
             $channel = $connection->channel();
-            $this->declareTopology(
-                $channel,
-                $config,
-                $queue,
-                $this->routingKeys(),
-                $options['exchange_type'] ?? $config->exchangeType,
-                $retry,
-                $options['queue_type'] ?? null,
-            );
+            $this->declareFor($channel, $config);
 
             $channel->basic_qos(
                 $options['qos_prefetch_size'] ?? 0,
@@ -267,6 +279,20 @@ abstract class Worker
         pcntl_signal(SIGINT, function (): void {
             $this->stop();
         });
+    }
+
+    private function declareFor(object $channel, ConnectionConfig $config): void
+    {
+        $options = $this->options();
+        $this->declareTopology(
+            $channel,
+            $config,
+            $this->queueName(),
+            $this->routingKeys(),
+            $options['exchange_type'] ?? $config->exchangeType,
+            $this->retrySettings(),
+            $options['queue_type'] ?? null,
+        );
     }
 
     private function declareTopology(

@@ -253,20 +253,6 @@ final class StoppingWorker extends Worker
         self::$options = $queueType === null ? [] : ['queue_type' => $queueType];
     }
 
-    /** Declares the topology up front so a publish before subscribe() is not lost. */
-    public function declare(): void
-    {
-        $config = \Mirabel\RabbitMQ\ConnectionConfig::fromEnvironment();
-        $connection = $this->connectionFactory()->connect($config);
-        $channel = $connection->channel();
-        (new \ReflectionMethod(Worker::class, 'declareTopology'))->invoke(
-            $this, $channel, $config, self::$queue, self::$routingKeys, 'topic', self::$retry,
-            self::$options['queue_type'] ?? null,
-        );
-        $channel->close();
-        $connection->close();
-    }
-
     public function handle(Envelope $envelope): void
     {
         $this->bodies[] = $envelope->body;
