@@ -185,7 +185,7 @@ final class WorkerTopologyTest extends TestCase
         $worker = new StoppingWorker($queue, ['order.paid'], static function (): void {
         });
 
-        $this->expectException(\PhpAmqpLib\Exception\AMQPProtocolChannelException::class);
+        $this->expectException(\Mirabel\RabbitMQ\Exception\TopologyException::class);
         $this->expectExceptionMessage('PRECONDITION_FAILED');
         $worker->subscribe();
     }

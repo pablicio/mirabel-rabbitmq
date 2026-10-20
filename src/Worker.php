@@ -91,7 +91,7 @@ abstract class Worker
                         'queue' => $this->queueName(),
                         'exception' => $exception,
                     ]);
-                    throw $exception;
+                    throw $this->refused($exception);
                 }
 
                 // A worker that was consuming normally starts a fresh reconnect budget.
@@ -382,6 +382,18 @@ abstract class Worker
      * PRECONDITION_FAILED (406) and ACCESS_REFUSED (403) mean the topology or
      * the permissions are wrong. They are configuration errors, not outages.
      */
+    private function refused(\Throwable $exception): TopologyException
+    {
+        if ($exception instanceof TopologyException) {
+            return $exception;
+        }
+
+        return new TopologyException(
+            sprintf("RabbitMQ refused the topology of queue '%s': %s", $this->queueName(), $exception->getMessage()),
+            (int) $exception->getCode(),
+        );
+    }
+
     private static function isConfigurationError(\Throwable $exception): bool
     {
         if ($exception instanceof TopologyException) {
