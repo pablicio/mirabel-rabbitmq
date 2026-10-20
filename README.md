@@ -119,6 +119,12 @@ In Laravel, package discovery registers an optional bridge: the
 Laravel log, and `php artisan mirabel:work EmitirNotaFiscal` runs a worker. The
 core does not depend on Laravel.
 
+A worker also operates its own queues: `pending()`, `counts()`, `peek()`,
+`failed()` with `Envelope::failure()`, `reprocess($which)`, `discard($which)`
+and `purge()`. Queues can be capped (`MAX_LENGTH`, `OVERFLOW`), events can be
+`MANDATORY`, and the outbox and the idempotency store come ready for PDO
+(`PdoOutboxStore`, `PdoIdempotencyStore`).
+
 Delivery is at-least-once: handlers should be idempotent. A worker can plug in
 an `IdempotencyStoreInterface` to skip messages it has already processed.
 

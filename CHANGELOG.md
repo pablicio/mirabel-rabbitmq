@@ -34,6 +34,33 @@
 - `php artisan mirabel:declare [Worker...]` declares the topology of the given
   workers, or of every worker in `app/Workers`.
 
+### Added — operating queues from the worker
+
+- `pending()`, `counts()` (queue, `.retry`, `.error`), `peek()` and `failed()`
+  read a worker's queues without consuming; `Envelope::failure()` says why a
+  message is in the error queue, `Envelope::toArray()` prints a message as
+  Mirabel sees it, `Envelope::$routingKey`.
+- `reprocess(?callable $which, ?int $limit)` moves picked messages from the
+  error queue back as fresh deliveries (no retry history, confirmed before the
+  original leaves); `discard(callable $which)` deletes picked ones; `purge()`
+  empties the worker's queue.
+- `reject(because: ...)` / `nack(because: ...)` write a reason on the message
+  (`x-mirabel-detail`, `failure()['detail']`).
+- Queue limits: `MAX_LENGTH` and `OVERFLOW` (`drop-head`, `reject-publish`).
+- Mandatory events: `const MANDATORY = true` returns an unroutable message as
+  `UnroutableException` (312 `NO_ROUTE`), with no retries.
+- `PdoIdempotencyStore` and `PdoOutboxStore` (SQLite, MySQL, PostgreSQL).
+- Laravel bridge: the outbox migration, `OutboxStoreInterface` bound to the
+  application's PDO, and `php artisan mirabel:outbox` with backoff.
+- `ConsoleLogger`, one line per log message, for workers run as scripts.
+
+### Changed
+
+- Transport and topology errors surface as `ConnectionException` ("Cannot
+  reach RabbitMQ at host:port: reason") and `TopologyException` (with the
+  queue name and the broker's reason) instead of the client library's
+  exceptions.
+
 ### Added
 
 - `Worker::declare()` declares the queues, exchanges and bindings without

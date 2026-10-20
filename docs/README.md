@@ -27,6 +27,8 @@ caiba em poucas linhas.
 - [API com Envelope](#api-com-envelope)
 - [Notações anteriores](#notações-anteriores)
 - [Retry e fila de erro](#retry-e-fila-de-erro)
+- [Inspecionar e operar filas](#inspecionar-e-operar-filas)
+- [Erros](#erros)
 - [Semântica de entrega](#semântica-de-entrega)
 - [Testes](#testes)
 - [Uso com Laravel](#uso-com-laravel)
@@ -215,6 +217,24 @@ um worker pode tentar reconectar para sempre, mas uma publicação feita dentro 
 uma requisição HTTP não pode segurar a resposta indefinidamente. O `message_id`
 é o mesmo em todas as tentativas. Falhas de serialização do payload não são
 repetidas, pois não são falhas de transporte.
+
+### Publicação obrigatória
+
+Um evento publicado com uma routing key que nenhuma fila assina é descartado
+pelo exchange — e o broker confirma, porque descartar é um resultado válido.
+Com `MANDATORY`, a mensagem volta e `publish()` lança
+`Mirabel\RabbitMQ\Exception\UnroutableException` (312 `NO_ROUTE`), sem novas
+tentativas:
+
+```php
+final class PedidoUrgente extends Event
+{
+    const MANDATORY = true;
+}
+```
+
+Uma fila ligada por `#` no mesmo exchange dá rota a tudo, e nesse caso o
+`MANDATORY` nunca dispara.
 
 A ordem de precedência da routing key é: argumento de `publish()`, `const
 ROUTING_KEY`, `public static string $routingKey` (notação anterior) e, por fim,
@@ -445,7 +465,20 @@ const QUEUE_TYPE = 'quorum';
 
 A fila, a `.retry` e a `.error` são criadas como quorum queues. Uma fila que
 já existe com outro tipo não muda: o broker responde `PRECONDITION_FAILED`, e o
-worker para com esse erro em vez de tentar reconectar.
+worker para com uma `TopologyException` em vez de tentar reconectar.
+
+### Limite de fila
+
+```php
+const MAX_LENGTH = 50_000,
+    OVERFLOW = 'reject-publish';
+```
+
+`MAX_LENGTH` é o número máximo de mensagens prontas na fila do worker.
+`OVERFLOW` diz o que o broker faz quando ela está cheia: `drop-head` (o padrão
+do RabbitMQ) apaga a mais antiga; `reject-publish` recusa a nova — uma recusa
+que o produtor só vê com `MB_RABBITMQ_PUBLISHER_CONFIRMS=true`, como
+`PublishNotConfirmedException`.
 
 ## Retry e fila de erro
 
@@ -488,6 +521,13 @@ Uma mensagem que vai para a fila error carrega headers com o motivo:
 | `x-mirabel-attempts` | tentativa em que falhou |
 | `x-mirabel-failed-at` | timestamp Unix |
 | `x-mirabel-exception` | classe e mensagem da exceção, quando houver |
+| `x-mirabel-detail` | o texto passado em `reject(because: ...)` ou `nack(because: ...)` |
+
+O handler pode explicar uma recusa para quem for ler a fila de erro:
+
+```php
+$envelope->reject(because: "CEP fora da tabela: {$faixa}");
+```
 
 A fila normal recebe:
 
@@ -502,6 +542,71 @@ Essa informação sobrevive a restart do worker e funciona com múltiplas répli
 
 Quando `max-attempts` é atingido, a mensagem é publicada na exchange de erro e
 confirmada no consumo original. Ela não volta para retry novamente.
+
+## Inspecionar e operar filas
+
+Tudo pelo próprio worker, sem abrir o painel:
+
+```php
+$worker = new EmitirNotaFiscal();
+
+$worker->declare();   // fila, .retry, .error e bindings, sem consumir
+$worker->pending();   // mensagens prontas na fila do worker
+$worker->counts();    // [fila => n, fila.retry => n, fila.error => n]
+$worker->peek(10);    // as próximas, como Envelope, sem consumir
+$worker->failed(100); // as da fila de erro, sem consumir
+```
+
+Cada envelope de `failed()` diz por que está lá:
+
+```php
+foreach ($worker->failed() as $envelope) {
+    $falha = $envelope->failure();
+    // ['reason' => 'exception'|'nack'|'reject'|'poison', 'attempts' => 3,
+    //  'exception' => 'RuntimeException: ...', 'detail' => ..., 'failed_at' => ...]
+}
+```
+
+`$envelope->toArray()` mostra a mensagem inteira como a Mirabel a vê — tipo,
+routing key, identidade, versão do contrato, instante, persistência, corpo e,
+na fila de erro, a falha —, pronta para `json_encode()`.
+
+Para devolver mensagens da fila de erro à fila do worker:
+
+```php
+$worker->reprocess();                       // todas
+$worker->reprocess(fn (Envelope $e) =>      // só as escolhidas
+    str_contains($e->failure()['detail'] ?? '', '37704'));
+$worker->reprocess($filtro, limit: 50);     // aos poucos
+```
+
+Cada uma volta como entrega nova: o mesmo corpo, `message_id` e versão de
+contrato, sem o histórico de tentativas e sem os headers de falha — ganha todas
+as tentativas de novo. O broker confirma a cópia antes de a original sair da
+fila de erro. A fila é percorrida uma vez, pelo tamanho que tinha no começo,
+então uma mensagem que falha de novo durante o reprocessamento não é lida duas
+vezes.
+
+Para apagar o que foi lido e entendido, e só isso:
+
+```php
+$worker->discard(fn (Envelope $e) => $e->failure()['reason'] === 'poison');
+$worker->purge(); // esvazia a fila do worker (não a .retry nem a .error)
+```
+
+`discard()` e `purge()` não têm volta.
+
+## Erros
+
+| Exceção | Quando |
+| --- | --- |
+| `ConnectionException` | o broker não respondeu: `Cannot reach RabbitMQ at localhost:5672: Connection refused` |
+| `TopologyException` | o broker recusou a topologia do worker (406 `PRECONDITION_FAILED`, 403); o worker para |
+| `PublishNotConfirmedException` | com confirms, o broker recusou a mensagem (uma fila cheia com `reject-publish`) |
+| `UnroutableException` | um evento `MANDATORY` não chegou a nenhuma fila |
+
+Todas ficam em `Mirabel\RabbitMQ\Exception` e trazem na mensagem o motivo que
+o broker deu.
 
 ## Semântica de entrega
 
@@ -641,8 +746,29 @@ $dispatcher = new OutboxDispatcher($outboxStore, $publisher, $logger);
 $dispatcher->dispatch(limit: 100);
 ```
 
-O store deve implementar `OutboxStoreInterface` sobre a tecnologia da aplicação
-(banco relacional, Redis Streams ou outra). A operação `add()` precisa participar
+Para banco relacional, a biblioteca traz o store pronto,
+`Mirabel\RabbitMQ\Outbox\PdoOutboxStore` (SQLite, MySQL/MariaDB, PostgreSQL):
+
+```php
+$store = new PdoOutboxStore($pdo); // a mesma PDO da transação de negócio
+$store->install();                 // cria a tabela mirabel_outbox, uma vez
+```
+
+`install()` deve rodar fora de transação — numa migração ou num passo de
+deploy —, porque o MySQL confirma a transação aberta num `CREATE TABLE`.
+
+No Laravel, a ponte faz tudo: a migração vem com o pacote (`php artisan
+migrate`), `OutboxStoreInterface` é resolvido pelo container com o PDO da
+conexão padrão — e entra no mesmo `DB::transaction()` —, e o despachante é um
+comando:
+
+```bash
+php artisan mirabel:outbox          # uma rodada por segundo; espera 2, 4... até 30 s enquanto falha
+php artisan mirabel:outbox --once   # uma rodada só
+```
+
+Outros stores implementam `OutboxStoreInterface` sobre a tecnologia da
+aplicação (Redis Streams ou outra). A operação `add()` precisa participar
 da mesma transação que salva o dado de negócio. O dispatcher marca publicado
 somente depois do sucesso do publisher; em falha, chama `markFailed()` e deixa o
 registro disponível para retry conforme a política do store.
@@ -697,8 +823,21 @@ final class OrderWorker extends Worker
 }
 ```
 
+Para banco relacional, use `Mirabel\RabbitMQ\Idempotency\PdoIdempotencyStore`,
+que cria a própria tabela:
+
+```php
+protected function idempotencyStore(): PdoIdempotencyStore
+{
+    return new PdoIdempotencyStore($this->pdo);
+}
+```
+
 O store deve ser atômico e persistente, por exemplo Redis com `SET NX` ou uma
-tabela com índice único. Um array em memória não protege contra múltiplos
+tabela com índice único. Ele descarta repetições que chegam **depois** da
+primeira terminar; dois workers com a mesma chave ao mesmo tempo passam os dois
+pela pergunta. Para isso, reserve o efeito de negócio no banco (uma linha por
+pedido, com chave primária) antes de executá-lo. Um array em memória não protege contra múltiplos
 workers nem contra restart do processo.
 
 ## Observabilidade
@@ -712,6 +851,18 @@ aplicação (a ponte Laravel já faz isso com o log do framework):
 
 ```php
 Mirabel\RabbitMQ\Mirabel::useLogger($logger); // qualquer LoggerInterface
+```
+
+Para um worker que roda como script PHP — num contêiner, sob Supervisor ou
+systemd —, o `ConsoleLogger` escreve uma linha por mensagem no STDERR
+(`12:10:03 WARNING RabbitMQ worker connection will retry.`), e o
+`MinimumLevelLogger` esconde as linhas de `debug`, uma por mensagem:
+
+```php
+use Mirabel\RabbitMQ\Observability\ConsoleLogger;
+use Mirabel\RabbitMQ\Observability\MinimumLevelLogger;
+
+Mirabel::useLogger(new MinimumLevelLogger(new ConsoleLogger(), 'info'));
 ```
 
 Uma classe também pode fornecer seu próprio logger sobrescrevendo `logger()`:
@@ -757,9 +908,7 @@ Ainda não fazem parte do Core atual:
 - priority queues e single active consumer como opções de alto nível;
 - mais de um host na configuração (para um cluster, use um balanceador ou um
   nome de DNS na frente dos nós);
-- pacote Laravel separado;
-- `mandatory` + return listener (hoje, uma mensagem sem nenhuma fila ligada à
-  routing key é descartada pelo broker em silêncio, mesmo com confirms).
+- pacote Laravel separado (a ponte vem no mesmo pacote, opcional).
 
 O serializer pode ser trocado sobrescrevendo `serializer()` no evento ou worker.
 Publicações de alto volume num mesmo processo podem reaproveitar a conexão com
