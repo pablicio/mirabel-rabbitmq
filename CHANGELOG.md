@@ -19,6 +19,17 @@
 - The previous notations (lowercase `routing_keys`/`options`/`retry_options`
   and the static properties) keep working; uppercase constants win.
 
+### Added — Laravel bridge
+
+- `MirabelServiceProvider`, registered by package discovery: the
+  `MB_RABBITMQ_*` variables are kept in `config('mirabel')` and exported back
+  to the environment at boot, so they survive `config:cache` (a variable set by
+  the server always wins); the library logs to the Laravel log
+  (`MB_RABBITMQ_LOG_CHANNEL`); `php artisan mirabel:work <Worker>` runs a
+  worker built by the container. The core still does not depend on Laravel.
+- `Mirabel::useLogger()` sets the default logger of every event and worker that
+  does not override `logger()`.
+
 ### Fixed
 
 - **Retries no longer fan out to other services.** The retry queue used to

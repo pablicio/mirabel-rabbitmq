@@ -114,6 +114,11 @@ The classic `work($msg)` API with `const QUEUE`, `routing_keys`, `options` and
 `$routingKeys`, `$retry`, `$options`), are still supported. When both are
 present, the uppercase constant wins.
 
+In Laravel, package discovery registers an optional bridge: the
+`MB_RABBITMQ_*` variables survive `config:cache`, the library logs to the
+Laravel log, and `php artisan mirabel:work EmitirNotaFiscal` runs a worker. The
+core does not depend on Laravel.
+
 Delivery is at-least-once: handlers should be idempotent. A worker can plug in
 an `IdempotencyStoreInterface` to skip messages it has already processed.
 

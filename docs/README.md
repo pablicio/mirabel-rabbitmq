@@ -539,9 +539,37 @@ O CI (`.github/workflows/ci.yml`) roda as duas suítes em PHP 8.2, 8.3 e 8.4.
 
 ## Uso com Laravel
 
-O Core não registra Service Provider Laravel. Em uma aplicação Laravel, basta
-instalar o pacote local ou publicado e manter as variáveis `MB_RABBITMQ_*` no
-`.env`.
+O Core não depende do Laravel. Para quem usa Laravel, a biblioteca traz uma
+ponte opcional, `Mirabel\RabbitMQ\Laravel\MirabelServiceProvider`, que o
+*package discovery* registra sozinho no `composer require`. Não há nada para
+configurar além das variáveis `MB_RABBITMQ_*` no `.env`.
+
+A ponte faz três coisas:
+
+1. **Sobrevive ao `config:cache`.** A biblioteca lê o ambiente com `getenv()`.
+   Com a configuração em cache, o Laravel para de carregar o `.env` no
+   processo, e `getenv()` passaria a devolver `false`. A ponte guarda as
+   variáveis em `config('mirabel')` e, no boot, as exporta de volta para o
+   ambiente. Uma variável definida de verdade pelo servidor (Docker, systemd,
+   Kubernetes) sempre ganha: só o que falta é preenchido.
+2. **Liga o log do Laravel.** Reconexões, retries e mensagens enviadas para a
+   fila error vão para o canal padrão do Laravel. `MB_RABBITMQ_LOG_CHANNEL`
+   escolhe outro canal; `null` silencia.
+3. **Roda workers pelo Artisan:**
+
+```bash
+php artisan mirabel:work EmitirNotaFiscal            # App\Workers\EmitirNotaFiscal
+php artisan mirabel:work "Billing\Workers\Charge"   # nome completo
+```
+
+O worker é criado pelo container do Laravel, então pode receber dependências no
+construtor.
+
+Para ver ou mudar as chaves da configuração:
+
+```bash
+php artisan vendor:publish --tag=mirabel-config
+```
 
 As classes de evento e worker não precisam usar `Illuminate\*`:
 
@@ -549,9 +577,8 @@ As classes de evento e worker não precisam usar `Illuminate\*`:
 (new App\Events\OrderReceivedEvent(['id' => 123]))->publish();
 ```
 
-Para processos de longa duração, prefira um Artisan Command dedicado ou um
-processo supervisionado em vez de executar `subscribe()` manualmente em um
-Tinker de produção.
+Em produção, rode cada `mirabel:work` sob um supervisor de processos
+(Supervisor, systemd, o `restart` do Docker), nunca num Tinker.
 
 O Worker tenta reconectar após falhas de conexão usando backoff exponencial. O
 contador de tentativas volta a zero depois de uma conexão bem-sucedida, então
@@ -664,8 +691,14 @@ O Core depende de `psr/log` e usa `NullLogger` por padrão. Portanto, nenhuma
 configuração de logger é obrigatória e a biblioteca não escreve diretamente no
 stdout.
 
-Uma integração pode fornecer seu logger sobrescrevendo `logger()` na classe do
-evento ou worker:
+Para trocar o logger de todos os eventos e workers de uma vez, no boot da
+aplicação (a ponte Laravel já faz isso com o log do framework):
+
+```php
+Mirabel\RabbitMQ\Mirabel::useLogger($logger); // qualquer LoggerInterface
+```
+
+Uma classe também pode fornecer seu próprio logger sobrescrevendo `logger()`:
 
 ```php
 use Psr\Log\LoggerInterface;
