@@ -9,6 +9,7 @@ use LogicException;
 use Mirabel\RabbitMQ\Connection\ConnectionFactoryInterface;
 use Mirabel\RabbitMQ\Connection\PhpAmqpConnectionFactory;
 use Mirabel\RabbitMQ\Connection\QuietClose;
+use Mirabel\RabbitMQ\Exception\UnroutableException;
 use Mirabel\RabbitMQ\Observability\TelemetryRuntime;
 use Mirabel\RabbitMQ\Outbox\OutboxMessage;
 use Mirabel\RabbitMQ\Publishing\ChannelPublisher;
@@ -71,14 +72,15 @@ abstract class Event
 
         while (true) {
             try {
-                $this->publishAttempt($config, $message, $outboxMessage->routingKey);
+                $this->publishAttempt($config, $message, $outboxMessage->routingKey, static::mandatory());
                 $this->logger()->debug('RabbitMQ event published.', $context);
                 $this->recordTelemetry('published', $context);
 
                 return;
             } catch (\Throwable $exception) {
                 $attempt++;
-                if ($attempt > $config->publishRetries) {
+                // No queue for the key: trying again cannot find one.
+                if ($exception instanceof UnroutableException || $attempt > $config->publishRetries) {
                     $this->logger()->error('RabbitMQ event publication failed.', $context + [
                         'attempt' => $attempt,
                         'exception' => $exception,
@@ -197,10 +199,20 @@ abstract class Event
         return $properties;
     }
 
-    private function publishAttempt(ConnectionConfig $config, AMQPMessage $message, string $routingKey): void
+    /**
+     * const MANDATORY = true: a message that matches no queue comes back from
+     * the broker and publish() throws UnroutableException, instead of the
+     * exchange dropping it in silence.
+     */
+    public static function mandatory(): bool
+    {
+        return defined(static::class . '::MANDATORY') && (bool) constant(static::class . '::MANDATORY');
+    }
+
+    private function publishAttempt(ConnectionConfig $config, AMQPMessage $message, string $routingKey, bool $mandatory = false): void
     {
         if (PublisherRuntime::isEnabled()) {
-            PublisherRuntime::publish($this->connectionFactory(), $config, $message, $routingKey);
+            PublisherRuntime::publish($this->connectionFactory(), $config, $message, $routingKey, $mandatory);
 
             return;
         }
@@ -210,8 +222,8 @@ abstract class Event
 
         try {
             $channel = $connection->channel();
-            ChannelPublisher::prepare($channel, $config, $config->exchange);
-            ChannelPublisher::publish($channel, $config, $message, $config->exchange, $routingKey);
+            ChannelPublisher::prepare($channel, $config, $config->exchange, null, $mandatory);
+            ChannelPublisher::publish($channel, $config, $message, $config->exchange, $routingKey, $mandatory);
         } finally {
             QuietClose::all($channel, $connection);
         }

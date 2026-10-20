@@ -61,6 +61,40 @@ final class WorkerTopologyTest extends TestCase
         $this->connection?->close();
         putenv('MB_RABBITMQ_EXCHANGE');
         putenv('MB_RABBITMQ_PUBLISHER_CONFIRMS');
+        putenv('MB_RABBITMQ_PUBLISH_RETRIES');
+    }
+
+    public function testFullQueueRefusesThePublishWhenItRejectsOverflow(): void
+    {
+        putenv('MB_RABBITMQ_PUBLISH_RETRIES=0');
+        $worker = new CappedWorker($this->exchange . '.capped');
+        $this->track($worker::$queue);
+        $worker->declare();
+
+        (new PaidEvent(['order' => 1]))->publish();
+        (new PaidEvent(['order' => 2]))->publish();
+
+        $this->expectException(\Mirabel\RabbitMQ\Exception\PublishNotConfirmedException::class);
+        try {
+            (new PaidEvent(['order' => 3]))->publish();
+        } finally {
+            self::assertSame(2, $worker->pending());
+        }
+    }
+
+    public function testMandatoryEventWithoutAQueueComesBack(): void
+    {
+        putenv('MB_RABBITMQ_PUBLISHER_CONFIRMS=false');
+        $started = microtime(true);
+
+        try {
+            (new MandatoryEvent(['order' => 1]))->publish();
+            self::fail('An unroutable mandatory event must throw.');
+        } catch (\Mirabel\RabbitMQ\Exception\UnroutableException $exception) {
+            self::assertStringContainsString('312 NO_ROUTE', $exception->getMessage());
+            self::assertStringContainsString('order.nobody.listens', $exception->getMessage());
+        }
+        self::assertLessThan(1.0, microtime(true) - $started, 'An unroutable event is not retried.');
     }
 
     public function testHandledMessageIsAcknowledgedAndLeavesTheQueueEmpty(): void
@@ -363,4 +397,24 @@ final class StoppingWorker extends Worker
             }
         };
     }
+}
+
+final class CappedWorker extends Worker
+{
+    public static string $queue;
+
+    const EVENTS = [PaidEvent::class],
+        MAX_LENGTH = 2,
+        OVERFLOW = 'reject-publish';
+
+    public function __construct(string $queue)
+    {
+        self::$queue = $queue;
+    }
+}
+
+final class MandatoryEvent extends Event
+{
+    const ROUTING_KEY = 'order.nobody.listens',
+        MANDATORY = true;
 }

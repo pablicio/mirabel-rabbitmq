@@ -118,6 +118,8 @@ final class Convention
             'PREFETCH' => 'qos_prefetch_count',
             'QUEUE_TYPE' => 'queue_type',
             'EXCHANGE_TYPE' => 'exchange_type',
+            'MAX_LENGTH' => 'max_length',
+            'OVERFLOW' => 'overflow',
         ] as $constant => $option) {
             $value = self::constant($worker, $constant);
             if ($value !== null) {

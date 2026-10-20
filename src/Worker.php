@@ -517,7 +517,29 @@ abstract class Worker
             $options['exchange_type'] ?? $config->exchangeType,
             $this->retrySettings(),
             $options['queue_type'] ?? null,
+            self::limits($options),
         );
+    }
+
+    /**
+     * MAX_LENGTH caps the worker's queue; OVERFLOW says what the broker does
+     * past it: 'drop-head' (the default) discards the oldest message,
+     * 'reject-publish' refuses the new one — a refusal publishers see only
+     * with confirms on.
+     *
+     * @return array<string, array{0: string, 1: int|string}>
+     */
+    private static function limits(array $options): array
+    {
+        $limits = [];
+        if (isset($options['max_length'])) {
+            $limits['x-max-length'] = ['I', (int) $options['max_length']];
+        }
+        if (isset($options['overflow'])) {
+            $limits['x-overflow'] = ['S', (string) $options['overflow']];
+        }
+
+        return $limits;
     }
 
     private function declareTopology(
@@ -528,6 +550,7 @@ abstract class Worker
         string $exchangeType,
         array $retry,
         ?string $queueType = null,
+        array $limits = [],
     ): void {
         // 'quorum' (replicated) or 'classic'; omitted means the broker default.
         $typed = static fn (array $arguments): array => $queueType === null
@@ -545,7 +568,7 @@ abstract class Worker
         $channel->queue_declare($queue, false, true, false, false, false, $typed([
             'x-dead-letter-exchange' => ['S', $retryExchange],
             'x-dead-letter-routing-key' => ['S', $queue],
-        ]));
+        ] + $limits));
         $this->declareRetryQueue($channel, $retryQueue, $typed([
             'x-message-ttl' => ['I', (int) ($retry['delay'] ?? 0)],
             // Default exchange: routes by queue name, straight back to this worker only.

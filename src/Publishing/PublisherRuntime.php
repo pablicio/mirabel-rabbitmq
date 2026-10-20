@@ -32,6 +32,7 @@ final class PublisherRuntime
         ConnectionConfig $config,
         AMQPMessage $message,
         string $routingKey,
+        bool $mandatory = false,
     ): void {
         $key = implode(':', [
             $factory::class,
@@ -41,14 +42,16 @@ final class PublisherRuntime
             $config->vhost,
             $config->exchange,
             $config->exchangeType,
-            $config->publisherConfirms ? 'confirm' : 'plain',
+            $config->publisherConfirms || $mandatory ? 'confirm' : 'plain',
         ]);
 
         try {
-            $channel = self::channel($key, $factory, $config);
-            ChannelPublisher::publish($channel, $config, $message, $config->exchange, $routingKey);
+            $channel = self::channel($key, $factory, $config, $mandatory);
+            ChannelPublisher::publish($channel, $config, $message, $config->exchange, $routingKey, $mandatory);
         } catch (\Throwable $exception) {
-            self::close($key);
+            if (!$exception instanceof \Mirabel\RabbitMQ\Exception\UnroutableException) {
+                self::close($key);
+            }
             throw $exception;
         }
     }
@@ -60,7 +63,7 @@ final class PublisherRuntime
         }
     }
 
-    private static function channel(string $key, ConnectionFactoryInterface $factory, ConnectionConfig $config): object
+    private static function channel(string $key, ConnectionFactoryInterface $factory, ConnectionConfig $config, bool $mandatory = false): object
     {
         if (isset(self::$sessions[$key])) {
             return self::$sessions[$key]['channel'];
@@ -69,7 +72,7 @@ final class PublisherRuntime
         $connection = $factory->connect($config);
         try {
             $channel = $connection->channel();
-            ChannelPublisher::prepare($channel, $config, $config->exchange);
+            ChannelPublisher::prepare($channel, $config, $config->exchange, null, $mandatory);
         } catch (\Throwable $exception) {
             QuietClose::all($connection);
             throw $exception;
