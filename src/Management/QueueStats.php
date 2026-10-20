@@ -25,11 +25,14 @@ final class QueueStats
     /** @param array<string, mixed> $queue a /api/queues/{vhost}/{name} answer */
     public static function fromApi(array $queue, int $now): self
     {
-        $head = $queue['head_message_timestamp'] ?? null;
+        $ready = (int) ($queue['messages_ready'] ?? 0);
+        // the broker can keep the last head timestamp for a sample or two
+        // after the queue empties: nothing ready means nobody is waiting
+        $head = $ready > 0 ? ($queue['head_message_timestamp'] ?? null) : null;
 
         return new self(
             (string) ($queue['name'] ?? ''),
-            (int) ($queue['messages_ready'] ?? 0),
+            $ready,
             (int) ($queue['messages_unacknowledged'] ?? 0),
             (int) ($queue['consumers'] ?? 0),
             is_numeric($head) ? max(0, $now - (int) $head) : null,

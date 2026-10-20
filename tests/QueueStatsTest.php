@@ -34,4 +34,16 @@ final class QueueStatsTest extends TestCase
         self::assertNull($stats->oldestWaitSeconds);
         self::assertNull($stats->secondsToDrain());
     }
+
+    public function testAnEmptyQueueHasNobodyWaiting(): void
+    {
+        $stats = QueueStats::fromApi([
+            'name' => 'avisos.pedidos',
+            'messages_ready' => 0,
+            'head_message_timestamp' => 1_000,
+        ], 1_046);
+
+        self::assertNull($stats->oldestWaitSeconds);
+        self::assertSame(0, $stats->secondsToDrain());
+    }
 }
