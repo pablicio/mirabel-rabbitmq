@@ -31,7 +31,8 @@ final class WorkCommand extends Command
         }
 
         $queue = $class::definition()['queue'];
-        $this->info("{$class} listening on {$queue}. Ctrl+C to stop.");
+        $short = substr(strrchr('\\' . $class, '\\'), 1);
+        $this->info("{$short} consuming {$queue}, Ctrl+C to stop");
         $this->laravel->make($class)->subscribe();
 
         return self::SUCCESS;

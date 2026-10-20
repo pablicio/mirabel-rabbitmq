@@ -17,7 +17,7 @@ final class DeclareCommand extends Command
 {
     protected $signature = 'mirabel:declare {worker?* : class names; none means every worker in app/Workers}';
 
-    protected $description = 'Declare the queues, exchanges and bindings of Mirabel workers';
+    protected $description = 'Declare the queues and bindings of workers';
 
     public function handle(): int
     {
