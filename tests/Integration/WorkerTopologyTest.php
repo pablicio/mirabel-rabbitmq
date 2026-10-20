@@ -112,6 +112,31 @@ final class WorkerTopologyTest extends TestCase
         self::assertSame(0, $this->messagesIn($worker::$queue));
     }
 
+    public function testStatsComeFromTheManagementApi(): void
+    {
+        if (getenv('MB_RABBITMQ_MANAGEMENT_URL') === false) {
+            self::markTestSkipped('Set MB_RABBITMQ_MANAGEMENT_URL to reach the management API.');
+        }
+        $worker = new StoppingWorker($this->exchange . '.stats', ['order.paid'], static function (): void {
+        });
+        $this->track($worker::$queue);
+        $worker->declare();
+        (new PaidEvent(['order' => 1]))->publish();
+        (new PaidEvent(['order' => 2]))->publish();
+
+        $stats = null;
+        for ($i = 0; $i < 20 && ($stats === null || $stats->ready < 2); $i++) {
+            usleep(500_000); // the API refreshes its numbers every few seconds
+            $stats = $worker->stats();
+        }
+
+        self::assertSame($worker::$queue, $stats->queue);
+        self::assertSame(2, $stats->ready);
+        self::assertSame(0, $stats->consumers);
+        self::assertNotNull($stats->oldestWaitSeconds, 'Mirabel stamps every message with a timestamp.');
+        self::assertLessThan(60, $stats->oldestWaitSeconds);
+    }
+
     public function testPendingCountsTheMessagesWaitingInTheQueue(): void
     {
         $worker = new StoppingWorker($this->exchange . '.pending', ['order.paid'], static function (): void {

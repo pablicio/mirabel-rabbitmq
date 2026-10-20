@@ -9,6 +9,8 @@ use Mirabel\RabbitMQ\Connection\PhpAmqpConnectionFactory;
 use Mirabel\RabbitMQ\Connection\QuietClose;
 use Mirabel\RabbitMQ\Exception\TopologyException;
 use Mirabel\RabbitMQ\Idempotency\IdempotencyStoreInterface;
+use Mirabel\RabbitMQ\Management\ManagementApi;
+use Mirabel\RabbitMQ\Management\QueueStats;
 use Mirabel\RabbitMQ\Observability\TelemetryRuntime;
 use Mirabel\RabbitMQ\Serialization\JsonSerializer;
 use Mirabel\RabbitMQ\Serialization\SerializerInterface;
@@ -180,6 +182,16 @@ abstract class Worker
 
             return (int) $messages;
         });
+    }
+
+    /**
+     * Ready and unacknowledged messages, consumers, how long the oldest
+     * message waits and how fast the queue moves, from the broker's
+     * management API (MB_RABBITMQ_MANAGEMENT_URL).
+     */
+    public function stats(): QueueStats
+    {
+        return (new ManagementApi(ConnectionConfig::fromEnvironment()))->queue($this->queueName());
     }
 
     /**
