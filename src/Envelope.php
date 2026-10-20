@@ -21,7 +21,7 @@ final class Envelope
     private ?string $response = null;
 
     /**
-     * @param \Closure(AMQPMessage, bool): void|null $nackPolicy applied on
+     * @param \Closure(AMQPMessage, bool, string): void|null $nackPolicy applied on
      *        nack()/reject() without requeue. The Worker uses it to route the
      *        message: nack goes to retry (or to the error queue on the last
      *        attempt); reject goes straight to the error queue.
@@ -45,10 +45,11 @@ final class Envelope
 
     /**
      * Why a message is in an error queue: reason (exception, nack, reject or
-     * poison), the attempt it failed on, the exception and when. Null for a
-     * message that never failed.
+     * poison), the attempt it failed on, the exception, the text the handler
+     * passed to reject()/nack() and when. Null for a message that never
+     * failed.
      *
-     * @return array{reason: string, attempts: int, exception: ?string, failed_at: int}|null
+     * @return array{reason: string, attempts: int, exception: ?string, detail: ?string, failed_at: int}|null
      */
     public function failure(): ?array
     {
@@ -61,6 +62,7 @@ final class Envelope
             'reason' => (string) $headers['x-mirabel-failure-reason'],
             'attempts' => (int) ($headers['x-mirabel-attempts'] ?? 0),
             'exception' => isset($headers['x-mirabel-exception']) ? (string) $headers['x-mirabel-exception'] : null,
+            'detail' => isset($headers['x-mirabel-detail']) ? (string) $headers['x-mirabel-detail'] : null,
             'failed_at' => (int) ($headers['x-mirabel-failed-at'] ?? 0),
         ];
     }
@@ -106,11 +108,12 @@ final class Envelope
      * Temporary failure. Without requeue the message waits in the worker's
      * retry queue (or goes to the error queue on the last attempt). With
      * requeue it goes back to the same queue immediately, with no delay.
+     * $because is written on the message if it reaches the error queue.
      */
-    public function nack(bool $requeue = false): void
+    public function nack(bool $requeue = false, string $because = ''): void
     {
         if (!$requeue && $this->nackPolicy !== null) {
-            ($this->nackPolicy)($this->message, true);
+            ($this->nackPolicy)($this->message, true, $because);
         } else {
             $this->message->nack($requeue);
         }
@@ -119,12 +122,13 @@ final class Envelope
 
     /**
      * Permanent failure: the message can never succeed (invalid payload,
-     * unknown schema). Without requeue it goes straight to the error queue.
+     * unknown schema). Without requeue it goes straight to the error queue,
+     * with $because written on it for whoever reads the error queue.
      */
-    public function reject(bool $requeue = false): void
+    public function reject(bool $requeue = false, string $because = ''): void
     {
         if (!$requeue && $this->nackPolicy !== null) {
-            ($this->nackPolicy)($this->message, false);
+            ($this->nackPolicy)($this->message, false, $because);
         } else {
             $this->message->reject($requeue);
         }

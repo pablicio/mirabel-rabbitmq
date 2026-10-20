@@ -239,30 +239,66 @@ abstract class Worker
 
     /**
      * Moves messages from the error queue back to the worker's queue, oldest
-     * first, and returns how many. Each one goes back as a fresh delivery: the
+     * first, and returns how many. $which picks them (all when null); the
+     * others stay where they are. Each one goes back as a fresh delivery: the
      * same body, identity and contract version, without the retry history and
      * the failure headers, so it gets every attempt again. The broker confirms
      * each copy before the original leaves the error queue.
+     *
+     * @param (callable(Envelope): bool)|null $which
      */
-    public function reprocess(?int $limit = null): int
+    public function reprocess(?callable $which = null, ?int $limit = null): int
+    {
+        $queue = $this->queueName();
+
+        return $this->sweepErrors($which, $limit, static function (object $channel, AMQPMessage $message, ConnectionConfig $config) use ($queue): void {
+            $channel->basic_publish(self::withoutFailure($message), '', $queue);
+            $channel->wait_for_pending_acks($config->readWriteTimeout);
+        });
+    }
+
+    /**
+     * Deletes the messages of the error queue that $which picks, and returns
+     * how many. For messages that were read and understood — a test
+     * published by hand, a poison message whose producer was fixed. There is
+     * no undo.
+     *
+     * @param callable(Envelope): bool $which
+     */
+    public function discard(callable $which): int
+    {
+        return $this->sweepErrors($which, null, static function (): void {
+        });
+    }
+
+    /**
+     * Walks the error queue once — as many messages as it had when the sweep
+     * started, so messages that fail again during the sweep are not read
+     * twice — and runs $move on the picked ones before acknowledging them.
+     * The rest go back to the error queue, in order, when the channel closes.
+     */
+    private function sweepErrors(?callable $which, ?int $limit, \Closure $move): int
     {
         $config = ConnectionConfig::fromEnvironment();
         $connection = $this->connectionFactory()->connect($config);
         $channel = null;
-        $queue = $this->queueName();
+        $errorQueue = $this->queueName() . '.error';
         $moved = 0;
 
         try {
             $channel = $connection->channel();
+            [, $total] = $channel->queue_declare($errorQueue, true);
             $channel->confirm_select();
-            while ($limit === null || $moved < $limit) {
-                $message = $channel->basic_get($queue . '.error');
+            for ($read = 0; $read < $total && ($limit === null || $moved < $limit); $read++) {
+                $message = $channel->basic_get($errorQueue);
                 if ($message === null) {
                     break;
                 }
+                if ($which !== null && !$which($this->envelopeFor($channel, $message))) {
+                    continue;
+                }
 
-                $channel->basic_publish(self::withoutFailure($message), '', $queue);
-                $channel->wait_for_pending_acks($config->readWriteTimeout);
+                $move($channel, $message, $config);
                 $message->ack();
                 $moved++;
             }
@@ -275,6 +311,17 @@ abstract class Worker
         }
 
         return $moved;
+    }
+
+    private function envelopeFor(object $channel, AMQPMessage $message): Envelope
+    {
+        try {
+            $body = $this->serializer()->decode($message->getBody());
+        } catch (\JsonException) {
+            $body = $message->getBody();
+        }
+
+        return new Envelope($channel, $message, $body, $this->attempts($message, $this->queueName()));
     }
 
     /** @return list<Envelope> */
@@ -293,12 +340,7 @@ abstract class Worker
                     break;
                 }
 
-                try {
-                    $body = $this->serializer()->decode($message->getBody());
-                } catch (\JsonException) {
-                    $body = $message->getBody();
-                }
-                $envelopes[] = new Envelope($channel, $message, $body, $this->attempts($message, $this->queueName()));
+                $envelopes[] = $this->envelopeFor($channel, $message);
             }
         } catch (AMQPProtocolChannelException $exception) {
             if ($exception->getCode() !== 404) {
@@ -391,10 +433,10 @@ abstract class Worker
      * Permanent failure: the message cannot succeed, so it is parked in the
      * error queue without spending retries.
      */
-    public function reject(AMQPMessage $message, bool $requeue = false): string
+    public function reject(AMQPMessage $message, bool $requeue = false, string $because = ''): string
     {
         if (!$requeue && $this->activeChannel !== null) {
-            $this->fail($message, false, 'reject');
+            $this->fail($message, false, 'reject', null, $because);
 
             return 'reject';
         }
@@ -632,7 +674,13 @@ abstract class Worker
                     $message,
                     $body,
                     $this->attempts($message, $queue),
-                    fn (AMQPMessage $failed, bool $retryable) => $this->fail($failed, $retryable, $retryable ? 'nack' : 'reject'),
+                    fn (AMQPMessage $failed, bool $retryable, string $because = '') => $this->fail(
+                        $failed,
+                        $retryable,
+                        $retryable ? 'nack' : 'reject',
+                        null,
+                        $because,
+                    ),
                 );
                 $this->handle($envelope);
                 if (!$envelope->isResponded()) {
@@ -678,7 +726,7 @@ abstract class Worker
      * max_attempts is reached; everything else is parked in the error queue
      * with headers explaining why.
      */
-    private function fail(AMQPMessage $message, bool $retryable, string $reason, ?\Throwable $exception = null): void
+    private function fail(AMQPMessage $message, bool $retryable, string $reason, ?\Throwable $exception = null, string $detail = ''): void
     {
         $queue = (string) $this->activeQueue;
         $attempt = $this->attempts($message, $queue);
@@ -702,7 +750,7 @@ abstract class Worker
         }
 
         $this->activeChannel->basic_publish(
-            $this->withFailureHeaders($message, $reason, $attempt, $exception),
+            $this->withFailureHeaders($message, $reason, $attempt, $exception, $detail),
             (string) $this->activeErrorExchange,
             $queue,
         );
@@ -723,7 +771,7 @@ abstract class Worker
         ]);
     }
 
-    private function withFailureHeaders(AMQPMessage $message, string $reason, int $attempt, ?\Throwable $exception): AMQPMessage
+    private function withFailureHeaders(AMQPMessage $message, string $reason, int $attempt, ?\Throwable $exception, string $detail = ''): AMQPMessage
     {
         $properties = $message->get_properties();
         $headers = isset($properties['application_headers']) && method_exists($properties['application_headers'], 'getNativeData')
@@ -734,6 +782,9 @@ abstract class Worker
         $headers['x-mirabel-failed-at'] = time();
         if ($exception !== null) {
             $headers['x-mirabel-exception'] = $exception::class . ': ' . substr($exception->getMessage(), 0, 500);
+        }
+        if ($detail !== '') {
+            $headers['x-mirabel-detail'] = substr($detail, 0, 500);
         }
         $properties['application_headers'] = new AMQPTable($headers);
 

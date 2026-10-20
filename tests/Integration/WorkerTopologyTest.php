@@ -165,6 +165,35 @@ final class WorkerTopologyTest extends TestCase
         self::assertSame('order-7-paid', $back[0]->toArray()['message_id']);
     }
 
+    public function testErrorQueueIsSweptByReason(): void
+    {
+        $worker = new StoppingWorker($this->exchange . '.sweep', ['order.paid'], static function (Envelope $envelope, StoppingWorker $worker): void {
+            $order = $envelope->body['order'];
+            if ($order === 3) {
+                $worker->stop();
+            }
+            $envelope->reject(because: $order === 2 ? 'unknown zip code range' : 'test order');
+        });
+        $this->track($worker::$queue);
+        $worker->declare();
+        foreach ([1, 2, 3] as $order) {
+            (new PaidEvent(['order' => $order]))->publish();
+        }
+        $worker->subscribe();
+
+        $details = array_map(static fn (Envelope $e): ?string => $e->failure()['detail'], $worker->failed());
+        self::assertSame(['test order', 'unknown zip code range', 'test order'], $details);
+
+        $zip = static fn (Envelope $e): bool => $e->failure()['detail'] === 'unknown zip code range';
+        self::assertSame(1, $worker->reprocess($zip));
+        self::assertSame(1, $worker->pending());
+        self::assertSame(2, $this->messagesIn($worker::$queue . '.error'), 'The others stay in the error queue.');
+
+        self::assertSame(2, $worker->discard(static fn (Envelope $e): bool => $e->failure()['detail'] === 'test order'));
+        self::assertSame(0, $this->messagesIn($worker::$queue . '.error'));
+        self::assertSame([2], array_map(static fn (Envelope $e) => $e->body['order'], $worker->peek(10)));
+    }
+
     public function testPoisonMessageIsParkedWithoutReachingTheHandler(): void
     {
         $worker = new StoppingWorker($this->exchange . '.poison', ['order.paid'], static function (): void {
