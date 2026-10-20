@@ -9,6 +9,7 @@ use LogicException;
 use Mirabel\RabbitMQ\Connection\ConnectionFactoryInterface;
 use Mirabel\RabbitMQ\Connection\PhpAmqpConnectionFactory;
 use Mirabel\RabbitMQ\Connection\QuietClose;
+use Mirabel\RabbitMQ\Exception\NoReplyException;
 use Mirabel\RabbitMQ\Exception\UnroutableException;
 use Mirabel\RabbitMQ\Observability\TelemetryRuntime;
 use Mirabel\RabbitMQ\Outbox\OutboxMessage;
@@ -213,6 +214,64 @@ abstract class Event
      * the broker and publish() throws UnroutableException, instead of the
      * exchange dropping it in silence.
      */
+    /**
+     * Publishes the event as a question and waits for the worker's
+     * $envelope->reply(), through RabbitMQ's direct reply-to. Returns the
+     * decoded reply; throws NoReplyException when $timeout seconds pass.
+     *
+     * Use it sparingly: a queue decouples in time, and a question needs the
+     * answerer now — an HTTP call fails fast where this one waits.
+     */
+    public function ask(float $timeout = 3.0, ?string $routingKey = null): mixed
+    {
+        $config = ConnectionConfig::fromEnvironment();
+        $message = $this->buildOutboxMessage($config, $routingKey, null, null, null, null);
+        $correlation = bin2hex(random_bytes(8));
+        $properties = $message->properties;
+        $properties['correlation_id'] = $correlation;
+        $properties['reply_to'] = 'amq.rabbitmq.reply-to';
+
+        $connection = $this->connectionFactory()->connect($config);
+        $channel = null;
+        $reply = null;
+        $answered = false;
+
+        try {
+            $channel = $connection->channel();
+            ChannelPublisher::prepare($channel, $config, $config->exchange);
+            // The reply-to consumer must exist, with no-ack, before the publish.
+            $channel->basic_consume('amq.rabbitmq.reply-to', '', false, true, false, false,
+                function (AMQPMessage $answer) use (&$reply, &$answered, $correlation): void {
+                    if (!$answer->has('correlation_id') || $answer->get('correlation_id') === $correlation) {
+                        $reply = $this->serializer()->decode($answer->getBody());
+                        $answered = true;
+                    }
+                });
+            $channel->basic_publish(
+                new AMQPMessage($message->body, $properties),
+                $config->exchange,
+                $message->routingKey,
+            );
+
+            $deadline = microtime(true) + $timeout;
+            while (!$answered) {
+                $left = $deadline - microtime(true);
+                if ($left <= 0) {
+                    throw new NoReplyException(sprintf('No reply to %s in %.1f s.', $message->routingKey, $timeout));
+                }
+                try {
+                    $channel->wait(null, false, $left);
+                } catch (\PhpAmqpLib\Exception\AMQPTimeoutException) {
+                    // the deadline check above decides
+                }
+            }
+
+            return $reply;
+        } finally {
+            QuietClose::all($channel, $connection);
+        }
+    }
+
     public static function mandatory(): bool
     {
         return defined(static::class . '::MANDATORY') && (bool) constant(static::class . '::MANDATORY');

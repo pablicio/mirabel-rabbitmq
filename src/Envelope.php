@@ -154,6 +154,33 @@ final class Envelope
         return (bool) $this->message->isRedelivered();
     }
 
+    /** Whether whoever published this message is waiting for a reply (ask()). */
+    public function expectsReply(): bool
+    {
+        return $this->message->has('reply_to');
+    }
+
+    /**
+     * Answers an ask(): $body goes, as JSON, straight back to the channel that
+     * asked. A message nobody is waiting for is ignored.
+     */
+    public function reply(mixed $body): void
+    {
+        if (!$this->expectsReply()) {
+            return;
+        }
+
+        $properties = ['content_type' => 'application/json'];
+        if ($this->message->has('correlation_id')) {
+            $properties['correlation_id'] = $this->message->get('correlation_id');
+        }
+        $this->channel->basic_publish(
+            new AMQPMessage(json_encode($body, JSON_THROW_ON_ERROR), $properties),
+            '',
+            (string) $this->message->get('reply_to'),
+        );
+    }
+
     public function message(): AMQPMessage
     {
         return $this->message;
