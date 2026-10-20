@@ -175,15 +175,35 @@ abstract class Worker
      */
     public function pending(): int
     {
+        return $this->onQueue(static function (object $channel, string $queue): int {
+            [, $messages] = $channel->queue_declare($queue, true);
+
+            return (int) $messages;
+        });
+    }
+
+    /**
+     * Deletes the messages waiting in the worker's queue (Ready) and returns
+     * how many there were. Messages in the .retry and .error queues, and
+     * those delivered but not yet acknowledged, are kept. For test benches
+     * and for clearing a queue on purpose: there is no undo.
+     */
+    public function purge(): int
+    {
+        return $this->onQueue(static fn (object $channel, string $queue): int => (int) $channel->queue_purge($queue));
+    }
+
+    /** Runs $operation on the worker's queue; a queue that does not exist counts as empty. */
+    private function onQueue(\Closure $operation): int
+    {
         $config = ConnectionConfig::fromEnvironment();
         $connection = $this->connectionFactory()->connect($config);
         $channel = null;
 
         try {
             $channel = $connection->channel();
-            [, $messages] = $channel->queue_declare($this->queueName(), true);
 
-            return (int) $messages;
+            return $operation($channel, $this->queueName());
         } catch (AMQPProtocolChannelException $exception) {
             if ($exception->getCode() === 404) {
                 return 0;
