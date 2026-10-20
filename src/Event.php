@@ -58,9 +58,10 @@ abstract class Event
         ?string $correlationId = null,
         ?string $idempotencyKey = null,
         ?int $schemaVersion = null,
+        ?int $priority = null,
     ): void {
         $config = ConnectionConfig::fromEnvironment();
-        $outboxMessage = $this->buildOutboxMessage($config, $routingKey, $messageId, $correlationId, $idempotencyKey, $schemaVersion);
+        $outboxMessage = $this->buildOutboxMessage($config, $routingKey, $messageId, $correlationId, $idempotencyKey, $schemaVersion, $priority);
         $message = new AMQPMessage($outboxMessage->body, $outboxMessage->properties);
         $context = [
             'event' => static::class,
@@ -112,6 +113,7 @@ abstract class Event
         ?string $correlationId = null,
         ?string $idempotencyKey = null,
         ?int $schemaVersion = null,
+        ?int $priority = null,
     ): OutboxMessage {
         return $this->buildOutboxMessage(
             ConnectionConfig::fromEnvironment(),
@@ -120,6 +122,7 @@ abstract class Event
             $correlationId,
             $idempotencyKey,
             $schemaVersion,
+            $priority,
         );
     }
 
@@ -130,8 +133,14 @@ abstract class Event
         ?string $correlationId,
         ?string $idempotencyKey,
         ?int $schemaVersion,
+        ?int $priority = null,
     ): OutboxMessage {
         $properties = $this->messageProperties($messageId, $correlationId, $idempotencyKey, $schemaVersion);
+        $priority ??= defined(static::class . '::PRIORITY') ? (int) constant(static::class . '::PRIORITY') : null;
+        if ($priority !== null) {
+            // Only a queue declared with MAX_PRIORITY orders by it.
+            $properties['priority'] = $priority;
+        }
 
         return new OutboxMessage(
             id: (string) $properties['message_id'],

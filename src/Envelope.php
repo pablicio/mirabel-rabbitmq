@@ -17,6 +17,7 @@ final class Envelope
     public readonly string $idempotencyKey;
     public readonly int $schemaVersion;
     public readonly string $routingKey;
+    public readonly int $priority;
 
     private ?string $response = null;
 
@@ -41,6 +42,7 @@ final class Envelope
         $this->idempotencyKey = $this->idempotencyKey($message);
         $this->schemaVersion = $this->schemaVersion($message);
         $this->routingKey = (string) ($message->getRoutingKey() ?? '');
+        $this->priority = $message->has('priority') ? (int) $message->get('priority') : 0;
     }
 
     /**
@@ -89,6 +91,7 @@ final class Envelope
             'correlation_id' => $this->correlationId,
             'idempotency_key' => $this->idempotencyKey,
             'schema_version' => $this->schemaVersion,
+            'priority' => $this->priority ?: null,
             'published_at' => $when($this->timestamp),
             'persistent' => ($properties['delivery_mode'] ?? 1) === 2,
             'content_type' => $properties['content_type'] ?? null,

@@ -120,6 +120,8 @@ final class Convention
             'EXCHANGE_TYPE' => 'exchange_type',
             'MAX_LENGTH' => 'max_length',
             'OVERFLOW' => 'overflow',
+            'MAX_PRIORITY' => 'max_priority',
+            'SINGLE_ACTIVE_CONSUMER' => 'single_active_consumer',
         ] as $constant => $option) {
             $value = self::constant($worker, $constant);
             if ($value !== null) {

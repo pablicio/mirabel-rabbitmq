@@ -82,6 +82,35 @@ final class WorkerTopologyTest extends TestCase
         }
     }
 
+    public function testPriorityQueueDeliversTheUrgentFirst(): void
+    {
+        $worker = new PriorityWorker($this->exchange . '.priority');
+        $this->track($worker::$queue);
+        $worker->declare();
+
+        foreach ([[0, 1], [1, 1], [2, 5], [3, 1], [4, 5]] as [$order, $priority]) {
+            (new PaidEvent(['order' => $order]))->publish(priority: $priority);
+        }
+
+        $peeked = $worker->peek(5);
+        self::assertSame([2, 4, 0, 1, 3], array_map(static fn (Envelope $e) => $e->body['order'], $peeked));
+        self::assertSame([5, 5, 1, 1, 1], array_map(static fn (Envelope $e) => $e->priority, $peeked));
+    }
+
+    public function testSingleActiveConsumerQueueIsDeclared(): void
+    {
+        $worker = new SoloWorker($this->exchange . '.solo');
+        $this->track($worker::$queue);
+        $worker->declare();
+        // Declaring it again with the same arguments is accepted.
+        $worker->declare();
+
+        self::assertSame(['x-single-active-consumer' => true], array_intersect_key(
+            $this->argumentsOf($worker::$queue),
+            ['x-single-active-consumer' => true],
+        ));
+    }
+
     public function testMandatoryEventWithoutAQueueComesBack(): void
     {
         putenv('MB_RABBITMQ_PUBLISHER_CONFIRMS=false');
@@ -361,6 +390,15 @@ final class WorkerTopologyTest extends TestCase
         array_push($this->exchanges, $queue . '.retry', $queue . '.error');
     }
 
+    /** @return array<string, mixed> */
+    private function argumentsOf(string $queue): array
+    {
+        $url = rtrim((string) getenv('MB_RABBITMQ_MANAGEMENT_URL'), '/') . '/api/queues/%2F/' . rawurlencode($queue);
+        $context = stream_context_create(['http' => ['header' => 'Authorization: Basic ' . base64_encode('guest:guest')]]);
+
+        return json_decode((string) file_get_contents($url, false, $context), true)['arguments'] ?? [];
+    }
+
     private function messagesIn(string $queue): int
     {
         [, $messages] = $this->channel->queue_declare($queue, true);
@@ -442,4 +480,30 @@ final class MandatoryEvent extends Event
 {
     const ROUTING_KEY = 'order.nobody.listens',
         MANDATORY = true;
+}
+
+final class PriorityWorker extends Worker
+{
+    public static string $queue;
+
+    const EVENTS = [PaidEvent::class],
+        MAX_PRIORITY = 10;
+
+    public function __construct(string $queue)
+    {
+        self::$queue = $queue;
+    }
+}
+
+final class SoloWorker extends Worker
+{
+    public static string $queue;
+
+    const EVENTS = [PaidEvent::class],
+        SINGLE_ACTIVE_CONSUMER = true;
+
+    public function __construct(string $queue)
+    {
+        self::$queue = $queue;
+    }
 }

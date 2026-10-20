@@ -537,7 +537,9 @@ abstract class Worker
      * MAX_LENGTH caps the worker's queue; OVERFLOW says what the broker does
      * past it: 'drop-head' (the default) discards the oldest message,
      * 'reject-publish' refuses the new one — a refusal publishers see only
-     * with confirms on.
+     * with confirms on. MAX_PRIORITY makes it a priority queue (events set
+     * PRIORITY); SINGLE_ACTIVE_CONSUMER delivers to one consumer at a time,
+     * the others waiting to take over.
      *
      * @return array<string, array{0: string, 1: int|string}>
      */
@@ -549,6 +551,12 @@ abstract class Worker
         }
         if (isset($options['overflow'])) {
             $limits['x-overflow'] = ['S', (string) $options['overflow']];
+        }
+        if (isset($options['max_priority'])) {
+            $limits['x-max-priority'] = ['I', (int) $options['max_priority']];
+        }
+        if (!empty($options['single_active_consumer'])) {
+            $limits['x-single-active-consumer'] = ['t', true];
         }
 
         return $limits;
