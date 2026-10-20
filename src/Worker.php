@@ -193,6 +193,121 @@ abstract class Worker
         return $this->onQueue(static fn (object $channel, string $queue): int => (int) $channel->queue_purge($queue));
     }
 
+    /**
+     * The next messages in the worker's queue, without consuming them: they
+     * go back to the queue, in order, when this returns.
+     *
+     * @return list<Envelope>
+     */
+    public function peek(int $limit = 1): array
+    {
+        return $this->browse($this->queueName(), $limit);
+    }
+
+    /**
+     * The messages parked in the worker's error queue, without removing them.
+     * Each envelope's failure() says why it is there.
+     *
+     * @return list<Envelope>
+     */
+    public function failed(int $limit = 100): array
+    {
+        return $this->browse($this->queueName() . '.error', $limit);
+    }
+
+    /**
+     * Moves messages from the error queue back to the worker's queue, oldest
+     * first, and returns how many. Each one goes back as a fresh delivery: the
+     * same body, identity and contract version, without the retry history and
+     * the failure headers, so it gets every attempt again. The broker confirms
+     * each copy before the original leaves the error queue.
+     */
+    public function reprocess(?int $limit = null): int
+    {
+        $config = ConnectionConfig::fromEnvironment();
+        $connection = $this->connectionFactory()->connect($config);
+        $channel = null;
+        $queue = $this->queueName();
+        $moved = 0;
+
+        try {
+            $channel = $connection->channel();
+            $channel->confirm_select();
+            while ($limit === null || $moved < $limit) {
+                $message = $channel->basic_get($queue . '.error');
+                if ($message === null) {
+                    break;
+                }
+
+                $channel->basic_publish(self::withoutFailure($message), '', $queue);
+                $channel->wait_for_pending_acks($config->readWriteTimeout);
+                $message->ack();
+                $moved++;
+            }
+        } catch (AMQPProtocolChannelException $exception) {
+            if ($exception->getCode() !== 404) {
+                throw $exception;
+            }
+        } finally {
+            QuietClose::all($channel, $connection);
+        }
+
+        return $moved;
+    }
+
+    /** @return list<Envelope> */
+    private function browse(string $queue, int $limit): array
+    {
+        $config = ConnectionConfig::fromEnvironment();
+        $connection = $this->connectionFactory()->connect($config);
+        $channel = null;
+        $envelopes = [];
+
+        try {
+            $channel = $connection->channel();
+            while (count($envelopes) < $limit) {
+                $message = $channel->basic_get($queue);
+                if ($message === null) {
+                    break;
+                }
+
+                try {
+                    $body = $this->serializer()->decode($message->getBody());
+                } catch (\JsonException) {
+                    $body = $message->getBody();
+                }
+                $envelopes[] = new Envelope($channel, $message, $body, $this->attempts($message, $this->queueName()));
+            }
+        } catch (AMQPProtocolChannelException $exception) {
+            if ($exception->getCode() !== 404) {
+                throw $exception;
+            }
+        } finally {
+            // Closing without an ack puts every message back where it was.
+            QuietClose::all($channel, $connection);
+        }
+
+        return $envelopes;
+    }
+
+    private static function withoutFailure(AMQPMessage $message): AMQPMessage
+    {
+        $properties = $message->get_properties();
+        if (isset($properties['application_headers']) && method_exists($properties['application_headers'], 'getNativeData')) {
+            $headers = array_filter(
+                $properties['application_headers']->getNativeData(),
+                static fn (string $name): bool => !str_starts_with($name, 'x-mirabel-')
+                    && !str_starts_with($name, 'x-death')
+                    && !str_starts_with($name, 'x-first-death')
+                    && !str_starts_with($name, 'x-last-death'),
+                ARRAY_FILTER_USE_KEY,
+            );
+            $properties['application_headers'] = new AMQPTable($headers);
+        }
+
+        return new AMQPMessage($message->getBody(), $properties);
+    }
+
     /** Runs $operation on the worker's queue; a queue that does not exist counts as empty. */
     private function onQueue(\Closure $operation): int
     {

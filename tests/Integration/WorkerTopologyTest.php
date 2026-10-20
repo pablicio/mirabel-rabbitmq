@@ -126,6 +126,40 @@ final class WorkerTopologyTest extends TestCase
         self::assertStringContainsString('gateway timeout on attempt 2', $headers['x-mirabel-exception']);
     }
 
+    public function testFailedMessagesCanBeReadAndReprocessedWithFreshAttempts(): void
+    {
+        $worker = new StoppingWorker($this->exchange . '.reprocess', ['order.paid'], static function (Envelope $envelope, StoppingWorker $worker): void {
+            if ($envelope->attempt === 2) {
+                $worker->stop();
+            }
+            throw new \RuntimeException('SEFAZ offline');
+        }, maxAttempts: 2);
+        $this->track($worker::$queue);
+        $worker->declare();
+        (new PaidEvent(['order' => 7]))->publish(messageId: 'order-7-paid');
+        $worker->subscribe();
+
+        $failed = $worker->failed();
+        self::assertCount(1, $failed);
+        self::assertSame(['order' => 7], $failed[0]->body);
+        self::assertSame('order-7-paid', $failed[0]->messageId);
+        self::assertSame('exception', $failed[0]->failure()['reason']);
+        self::assertSame(2, $failed[0]->failure()['attempts']);
+        self::assertStringContainsString('SEFAZ offline', (string) $failed[0]->failure()['exception']);
+        self::assertSame(1, $this->messagesIn($worker::$queue . '.error'), 'failed() must not remove anything.');
+
+        self::assertSame(1, $worker->reprocess());
+        self::assertSame(0, $this->messagesIn($worker::$queue . '.error'));
+
+        $back = $worker->peek();
+        self::assertCount(1, $back);
+        self::assertSame('order-7-paid', $back[0]->messageId);
+        self::assertSame(1, $back[0]->attempt, 'A reprocessed message starts its attempts over.');
+        self::assertNull($back[0]->failure());
+        self::assertSame(1, $worker->pending(), 'peek() must not remove anything.');
+        self::assertSame('order-7-paid', $back[0]->toArray()['message_id']);
+    }
+
     public function testPoisonMessageIsParkedWithoutReachingTheHandler(): void
     {
         $worker = new StoppingWorker($this->exchange . '.poison', ['order.paid'], static function (): void {
