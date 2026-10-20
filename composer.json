@@ -29,7 +29,8 @@
         "phpunit/phpunit": "^11.0"
     },
     "suggest": {
-        "ext-pcntl": "Graceful shutdown of workers on SIGTERM/SIGINT (Linux/macOS)."
+        "ext-pcntl": "Graceful shutdown of workers on SIGTERM/SIGINT (Linux/macOS).",
+        "laravel/framework": "Optional bridge: config, environment export that survives config:cache, php artisan mirabel:work."
     },
     "autoload": {
         "psr-4": {
@@ -39,6 +40,13 @@
     "autoload-dev": {
         "psr-4": {
             "Mirabel\\RabbitMQ\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Mirabel\\RabbitMQ\\Laravel\\MirabelServiceProvider"
+            ]
         }
     },
     "scripts": {
