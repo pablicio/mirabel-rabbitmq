@@ -7,6 +7,7 @@ namespace Mirabel\RabbitMQ;
 use Mirabel\RabbitMQ\Connection\ConnectionFactoryInterface;
 use Mirabel\RabbitMQ\Connection\PhpAmqpConnectionFactory;
 use Mirabel\RabbitMQ\Connection\QuietClose;
+use Mirabel\RabbitMQ\Exception\QueueUnavailableException;
 use Mirabel\RabbitMQ\Exception\TopologyException;
 use Mirabel\RabbitMQ\Idempotency\IdempotencyStoreInterface;
 use Mirabel\RabbitMQ\Management\ManagementApi;
@@ -315,9 +316,7 @@ abstract class Worker
                 $moved++;
             }
         } catch (AMQPProtocolChannelException $exception) {
-            if ($exception->getCode() !== 404) {
-                throw $exception;
-            }
+            self::emptyUnlessUnavailable($exception);
         } finally {
             QuietClose::all($channel, $connection);
         }
@@ -355,15 +354,31 @@ abstract class Worker
                 $envelopes[] = $this->envelopeFor($channel, $message);
             }
         } catch (AMQPProtocolChannelException $exception) {
-            if ($exception->getCode() !== 404) {
-                throw $exception;
-            }
+            self::emptyUnlessUnavailable($exception);
         } finally {
             // Closing without an ack puts every message back where it was.
             QuietClose::all($channel, $connection);
         }
 
         return $envelopes;
+    }
+
+    /**
+     * A queue that was never declared is simply empty. A 404 for a queue that
+     * exists but cannot be served — a classic queue on a node that is down —
+     * is not: its messages are out of reach, and saying "0" would be a lie.
+     */
+    private static function emptyUnlessUnavailable(AMQPProtocolChannelException $exception): void
+    {
+        if ($exception->getCode() !== 404) {
+            throw $exception;
+        }
+        if (!str_contains($exception->getMessage(), 'no queue')) {
+            throw new QueueUnavailableException(
+                'RabbitMQ cannot serve the queue right now: ' . $exception->getMessage(),
+                404,
+            );
+        }
     }
 
     private static function withoutFailure(AMQPMessage $message): AMQPMessage
@@ -396,10 +411,9 @@ abstract class Worker
 
             return $operation($channel, $this->queueName());
         } catch (AMQPProtocolChannelException $exception) {
-            if ($exception->getCode() === 404) {
-                return 0;
-            }
-            throw $exception;
+            self::emptyUnlessUnavailable($exception);
+
+            return 0;
         } finally {
             QuietClose::all($channel, $connection);
         }
