@@ -23,5 +23,7 @@ return [
 
     // Laravel log channel for the library's own messages (reconnects,
     // retries, error queue). null is the default channel; 'null' mutes it.
+    // Below log_level nothing is written: "debug" logs every message.
     'log_channel' => env('MB_RABBITMQ_LOG_CHANNEL'),
+    'log_level' => env('MB_RABBITMQ_LOG_LEVEL', 'info'),
 ];

@@ -20,7 +20,7 @@ final class Environment
     {
         $exported = [];
         foreach ($config as $key => $value) {
-            if ($key === 'log_channel' || $value === null || $value === '') {
+            if (str_starts_with((string) $key, 'log_') || $value === null || $value === '') {
                 continue;
             }
 

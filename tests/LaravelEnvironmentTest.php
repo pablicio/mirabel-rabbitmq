@@ -6,6 +6,7 @@ namespace Mirabel\RabbitMQ\Tests;
 
 use Mirabel\RabbitMQ\Laravel\Environment;
 use Mirabel\RabbitMQ\Mirabel;
+use Mirabel\RabbitMQ\Observability\MinimumLevelLogger;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
 use Psr\Log\NullLogger;
@@ -63,6 +64,28 @@ final class LaravelEnvironmentTest extends TestCase
 
         self::assertSame([], $exported);
         self::assertSame('from-the-server', getenv('MB_RABBITMQ_EXCHANGE'));
+    }
+
+    public function testMinimumLevelDropsTheMessagesBelowIt(): void
+    {
+        $inner = new class extends AbstractLogger {
+            public array $lines = [];
+
+            public function log($level, \Stringable|string $message, array $context = []): void
+            {
+                $this->lines[] = "{$level} {$message}";
+            }
+        };
+        $logger = new MinimumLevelLogger($inner, 'info');
+
+        $logger->debug('RabbitMQ telemetry');
+        $logger->info('RabbitMQ worker stopped gracefully.');
+        $logger->warning('RabbitMQ message sent to retry.');
+
+        self::assertSame([
+            'info RabbitMQ worker stopped gracefully.',
+            'warning RabbitMQ message sent to retry.',
+        ], $inner->lines);
     }
 
     public function testDefaultLoggerIsSilentUntilABridgePlugsOneIn(): void
