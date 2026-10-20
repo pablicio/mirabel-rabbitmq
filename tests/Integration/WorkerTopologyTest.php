@@ -125,7 +125,7 @@ final class WorkerTopologyTest extends TestCase
         (new PaidEvent(['order' => 2]))->publish();
 
         $stats = null;
-        for ($i = 0; $i < 20 && ($stats === null || $stats->ready < 2); $i++) {
+        for ($i = 0; $i < 30 && ($stats?->ready !== 2 || $stats->oldestWaitSeconds === null); $i++) {
             usleep(500_000); // the API refreshes its numbers every few seconds
             $stats = $worker->stats();
         }
