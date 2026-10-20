@@ -33,6 +33,9 @@ final class OutboxCommand extends Command
             Mirabel::logger(),
         );
         $this->trap([SIGINT, SIGTERM], fn () => $this->stop = true);
+        if (!$this->option('once')) {
+            $this->info('Publishing the outbox, Ctrl+C to stop');
+        }
 
         $wait = 1;
         while (!$this->stop) {
