@@ -16,12 +16,17 @@ final class OutboxDispatcher
     ) {
     }
 
+    private int $lastFailures = 0;
+    private ?\Throwable $lastError = null;
+
     public function dispatch(int $limit = 100): int
     {
         if ($limit < 1) {
             throw new \InvalidArgumentException('Outbox dispatch limit must be greater than zero.');
         }
 
+        $this->lastFailures = 0;
+        $this->lastError = null;
         $published = 0;
         foreach ($this->store->pending($limit) as $message) {
             try {
@@ -29,6 +34,8 @@ final class OutboxDispatcher
                 $this->store->markPublished($message->id);
                 $published++;
             } catch (\Throwable $exception) {
+                $this->lastFailures++;
+                $this->lastError = $exception;
                 $this->store->markFailed($message->id, $exception);
                 $this->logger->error('Outbox message publication failed.', [
                     'message_id' => $message->id,
@@ -40,5 +47,17 @@ final class OutboxDispatcher
         }
 
         return $published;
+    }
+
+    /** Messages the last dispatch() could not publish. */
+    public function lastFailures(): int
+    {
+        return $this->lastFailures;
+    }
+
+    /** Why the last failure of the last dispatch() happened, if any. */
+    public function lastError(): ?\Throwable
+    {
+        return $this->lastError;
     }
 }
