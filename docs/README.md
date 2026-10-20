@@ -356,6 +356,16 @@ Para iniciar o consumidor:
 (new OrderReceivedWorker())->subscribe();
 ```
 
+Para só criar as filas, exchanges e bindings, sem consumir — num passo de
+deploy, antes de a aplicação publicar o primeiro evento:
+
+```php
+(new OrderReceivedWorker())->declare();
+```
+
+Até a fila existir, um evento publicado com a routing key dela não tem para
+onde ir e é descartado pelo broker.
+
 `$msg` é uma instância de `PhpAmqpLib\Message\AMQPMessage`. A API clássica
 mantém disponíveis:
 
@@ -555,12 +565,18 @@ A ponte faz três coisas:
 2. **Liga o log do Laravel.** Reconexões, retries e mensagens enviadas para a
    fila error vão para o canal padrão do Laravel. `MB_RABBITMQ_LOG_CHANNEL`
    escolhe outro canal; `null` silencia.
-3. **Roda workers pelo Artisan:**
+3. **Roda e declara workers pelo Artisan:**
 
 ```bash
 php artisan mirabel:work EmitirNotaFiscal            # App\Workers\EmitirNotaFiscal
 php artisan mirabel:work "Billing\Workers\Charge"   # nome completo
+php artisan mirabel:declare                          # topologia de app/Workers
 ```
+
+O log da biblioteca entra no log do Laravel a partir de `info`: reconexões,
+retries, fila error e paradas. As linhas de `debug` — uma por publicação e por
+mensagem processada — ficam de fora, a não ser com
+`MB_RABBITMQ_LOG_LEVEL=debug`.
 
 O worker é criado pelo container do Laravel, então pode receber dependências no
 construtor.

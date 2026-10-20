@@ -29,6 +29,16 @@
   worker built by the container. The core still does not depend on Laravel.
 - `Mirabel::useLogger()` sets the default logger of every event and worker that
   does not override `logger()`.
+- `MB_RABBITMQ_LOG_LEVEL` (default `info`) keeps the per-message debug lines out
+  of the Laravel log; `MinimumLevelLogger` is the PSR-3 filter behind it.
+- `php artisan mirabel:declare [Worker...]` declares the topology of the given
+  workers, or of every worker in `app/Workers`.
+
+### Added
+
+- `Worker::declare()` declares the queues, exchanges and bindings without
+  consuming. Until a queue exists, an event published with its routing key is
+  dropped by the broker; declaring at deploy time closes that window.
 
 ### Fixed
 
