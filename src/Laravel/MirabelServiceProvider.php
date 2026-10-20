@@ -6,6 +6,7 @@ namespace Mirabel\RabbitMQ\Laravel;
 
 use Illuminate\Support\ServiceProvider;
 use Mirabel\RabbitMQ\Mirabel;
+use Mirabel\RabbitMQ\Observability\MinimumLevelLogger;
 
 /**
  * Optional Laravel bridge, found by package discovery. The core does not
@@ -23,11 +24,13 @@ final class MirabelServiceProvider extends ServiceProvider
         $config = (array) $this->app['config']->get('mirabel', []);
         Environment::export($config);
 
-        $channel = $config['log_channel'] ?? null;
-        Mirabel::useLogger($this->app['log']->channel($channel));
+        Mirabel::useLogger(new MinimumLevelLogger(
+            $this->app['log']->channel($config['log_channel'] ?? null),
+            (string) ($config['log_level'] ?? 'info'),
+        ));
 
         if ($this->app->runningInConsole()) {
-            $this->commands([WorkCommand::class]);
+            $this->commands([WorkCommand::class, DeclareCommand::class]);
             $this->publishes([
                 __DIR__ . '/../../config/mirabel.php' => $this->app->configPath('mirabel.php'),
             ], 'mirabel-config');
