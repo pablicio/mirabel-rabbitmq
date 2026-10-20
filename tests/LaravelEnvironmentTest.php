@@ -88,6 +88,18 @@ final class LaravelEnvironmentTest extends TestCase
         ], $inner->lines);
     }
 
+    public function testConsoleLoggerWritesOneLinePerMessage(): void
+    {
+        $stream = fopen('php://memory', 'w+');
+        (new \Mirabel\RabbitMQ\Observability\ConsoleLogger($stream))->warning('RabbitMQ worker connection will retry.');
+        rewind($stream);
+
+        self::assertMatchesRegularExpression(
+            '/^\d{2}:\d{2}:\d{2} WARNING RabbitMQ worker connection will retry\.\n$/',
+            stream_get_contents($stream),
+        );
+    }
+
     public function testDefaultLoggerIsSilentUntilABridgePlugsOneIn(): void
     {
         self::assertInstanceOf(NullLogger::class, Mirabel::logger());
