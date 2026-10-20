@@ -90,6 +90,11 @@ final class WorkerTopologyTest extends TestCase
         (new PaidEvent(['order' => 2]))->publish();
 
         self::assertSame(2, $worker->pending());
+        self::assertSame([
+            $worker::$queue => 2,
+            $worker::$queue . '.retry' => 0,
+            $worker::$queue . '.error' => 0,
+        ], $worker->counts());
 
         self::assertSame(2, $worker->purge());
         self::assertSame(0, $worker->pending());

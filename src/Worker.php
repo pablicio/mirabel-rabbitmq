@@ -183,6 +183,28 @@ abstract class Worker
     }
 
     /**
+     * Messages ready in the worker's queue and in its .retry and .error
+     * queues, keyed by queue name, in that order. A queue that does not
+     * exist counts as empty.
+     *
+     * @return array<string, int>
+     */
+    public function counts(): array
+    {
+        $queue = $this->queueName();
+        $counts = [];
+        foreach ([$queue, $queue . '.retry', $queue . '.error'] as $name) {
+            $counts[$name] = $this->onQueue(static function (object $channel) use ($name): int {
+                [, $messages] = $channel->queue_declare($name, true);
+
+                return (int) $messages;
+            });
+        }
+
+        return $counts;
+    }
+
+    /**
      * Deletes the messages waiting in the worker's queue (Ready) and returns
      * how many there were. Messages in the .retry and .error queues, and
      * those delivered but not yet acknowledged, are kept. For test benches
