@@ -152,6 +152,13 @@ abstract class Worker
         try {
             $channel = $connection->channel();
             $this->declareFor($channel, $config);
+        } catch (AMQPProtocolChannelException $exception) {
+            if (self::isConfigurationError($exception)) {
+                throw $this->refused($exception);
+            }
+            // a 404 for a queue that exists: its node is down
+            self::emptyUnlessUnavailable($exception);
+            throw $exception;
         } finally {
             QuietClose::all($channel, $connection);
         }
