@@ -78,6 +78,20 @@ final class WorkerTopologyTest extends TestCase
         self::assertSame(0, $this->messagesIn($worker::$queue));
     }
 
+    public function testPendingCountsTheMessagesWaitingInTheQueue(): void
+    {
+        $worker = new StoppingWorker($this->exchange . '.pending', ['order.paid'], static function (): void {
+        });
+        $this->track($worker::$queue);
+        self::assertSame(0, $worker->pending(), 'A queue that was never declared has nothing pending.');
+
+        $worker->declare();
+        (new PaidEvent(['order' => 1]))->publish();
+        (new PaidEvent(['order' => 2]))->publish();
+
+        self::assertSame(2, $worker->pending());
+    }
+
     public function testRetriedMessageReturnsOnlyToItsOwnQueue(): void
     {
         $worker = new StoppingWorker($this->exchange . '.flaky', ['order.paid'], static function (Envelope $envelope, StoppingWorker $worker): void {

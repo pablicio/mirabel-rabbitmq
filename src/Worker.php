@@ -168,6 +168,32 @@ abstract class Worker
         throw new \LogicException('Worker must implement handle() or work().');
     }
 
+    /**
+     * Messages waiting in the worker's queue for a consumer (Ready). A queue
+     * that was never declared has none. Delivered but unacknowledged
+     * messages are not counted.
+     */
+    public function pending(): int
+    {
+        $config = ConnectionConfig::fromEnvironment();
+        $connection = $this->connectionFactory()->connect($config);
+        $channel = null;
+
+        try {
+            $channel = $connection->channel();
+            [, $messages] = $channel->queue_declare($this->queueName(), true);
+
+            return (int) $messages;
+        } catch (AMQPProtocolChannelException $exception) {
+            if ($exception->getCode() === 404) {
+                return 0;
+            }
+            throw $exception;
+        } finally {
+            QuietClose::all($channel, $connection);
+        }
+    }
+
     /** @return array{queue: string, active_queue: ?string, connected: bool, shutdown_requested: bool} */
     public function health(): array
     {
