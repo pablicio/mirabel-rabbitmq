@@ -1,7 +1,16 @@
 # Mirabel RabbitMQ
 
 Biblioteca PHP framework-agnostic para publicar e consumir mensagens RabbitMQ
-com uma API curta, declarativa e baseada em `php-amqplib`.
+com uma API curta e declarativa, construída sobre a
+[`php-amqplib`](https://github.com/php-amqplib/php-amqplib).
+
+A `php-amqplib` é o cliente AMQP de referência em PHP: criada por Vadim Zaliva
+e Alvaro Videla, mantida há anos pela comunidade e usada nos tutoriais oficiais
+do RabbitMQ. Ela fala o protocolo inteiro, com precisão, e é ela quem conversa
+com o broker por baixo de tudo o que o Mirabel faz. O Mirabel não a substitui:
+ele empacota as decisões que todo serviço acaba repetindo — topologia, retry,
+fila de erro, envelope, convenção de nomes — para que um evento ou um worker
+caiba em poucas linhas.
 
 > Esta documentação descreve o comportamento implementado no código atual.
 > Recursos ainda não implementados são identificados explicitamente na seção
@@ -14,8 +23,9 @@ com uma API curta, declarativa e baseada em `php-amqplib`.
 - [Configuração](#configuração)
 - [Publicando eventos](#publicando-eventos)
 - [Consumindo mensagens](#consumindo-mensagens)
-- [API clássica](#api-clássica)
+- [Notação com constantes](#notação-com-constantes)
 - [API com Envelope](#api-com-envelope)
+- [Notações anteriores](#notações-anteriores)
 - [Retry e fila de erro](#retry-e-fila-de-erro)
 - [Semântica de entrega](#semântica-de-entrega)
 - [Testes](#testes)
@@ -128,7 +138,8 @@ Credenciais padrão: `guest` / `guest`.
 
 ## Publicando eventos
 
-Um evento define sua routing key e recebe o payload no construtor:
+Um evento declara sua routing key numa constante e recebe o payload no
+construtor:
 
 ```php
 <?php
@@ -139,9 +150,15 @@ use Mirabel\RabbitMQ\Event;
 
 final class OrderReceivedEvent extends Event
 {
-    public static string $routingKey = 'orders.received';
+    const ROUTING_KEY = 'orders.received';
 }
 ```
+
+A constante é opcional. Sem ela, a routing key vem do nome da classe: as
+palavras em minúsculas, separadas por ponto, sem o sufixo `Event`
+(`OrderReceivedEvent` → `order.received`, `PedidoPago` → `pedido.pago`).
+`OrderReceivedEvent::routingKey()` devolve a chave resolvida. A versão do
+contrato também cabe numa constante: `const SCHEMA_VERSION = 2;`.
 
 Publicação:
 
@@ -199,12 +216,102 @@ uma requisição HTTP não pode segurar a resposta indefinidamente. O `message_i
 é o mesmo em todas as tentativas. Falhas de serialização do payload não são
 repetidas, pois não são falhas de transporte.
 
-Um evento sem `public static string $routingKey` e sem routing key na chamada
-lança `LogicException` explicando o que falta.
+A ordem de precedência da routing key é: argumento de `publish()`, `const
+ROUTING_KEY`, `public static string $routingKey` (notação anterior) e, por fim,
+o nome da classe.
 
 ## Consumindo mensagens
 
-### API clássica recomendada
+### Notação com constantes
+
+Um worker declara tudo num único `const`, com as palavras que importam:
+
+```php
+<?php
+
+namespace App\Workers;
+
+use App\Events\OrderReceivedEvent;
+use Mirabel\RabbitMQ\Envelope;
+use Mirabel\RabbitMQ\Worker;
+
+final class ChargeOrder extends Worker
+{
+    const QUEUE = 'billing.orders-received',
+        EVENTS = [OrderReceivedEvent::class],
+        ATTEMPTS = 4,
+        RETRY_DELAY = 5_000;
+
+    public function handle(Envelope $envelope): void
+    {
+        charge($envelope->body['id']);
+    }
+}
+```
+
+Nenhuma constante é obrigatória. O que não for declarado segue uma convenção:
+
+| Constante | Significado | Quando omitida |
+| --- | --- | --- |
+| `QUEUE` | nome da fila | nome da classe em kebab case, sem `Worker` (`ChargeOrder` → `charge-order`) |
+| `EVENTS` | classes de evento assinadas | — |
+| `ROUTING_KEYS` | routing keys extras (aceitam `*` e `#`) | — |
+| `ATTEMPTS` | entregas antes da fila error | `1` |
+| `RETRY_DELAY` | milissegundos na fila retry | `0` |
+| `PREFETCH` | mensagens sem ack por consumidor | padrão do broker |
+| `QUEUE_TYPE` | `classic` ou `quorum` | `classic` |
+| `EXCHANGE_TYPE` | tipo do exchange | `MB_RABBITMQ_EXCHANGE_TYPE` |
+
+`EVENTS` e `ROUTING_KEYS` se somam: as chaves dos eventos vêm primeiro, depois
+as extras, sem repetição. Assinar pela classe do evento evita que a chave seja
+escrita em dois lugares: se `OrderReceivedEvent` mudar de chave, o worker
+acompanha.
+
+Para ver o que o worker vai declarar, sem abrir conexão:
+
+```php
+print_r(ChargeOrder::definition());
+```
+
+```text
+Array
+(
+    [queue] => billing.orders-received
+    [routing_keys] => Array
+        (
+            [0] => orders.received
+        )
+
+    [retry] => Array
+        (
+            [delay] => 5000
+            [max_attempts] => 4
+        )
+
+    [options] => Array
+        (
+        )
+
+)
+```
+
+Um worker mínimo é só a classe e o `handle()`:
+
+```php
+final class EnviarEmail extends Worker
+{
+    const EVENTS = [PedidoPago::class];
+
+    public function handle(Envelope $envelope): void { /* ... */ }
+}
+// fila "enviar-email", chave "pedido.pago", uma tentativa
+```
+
+### Notações anteriores
+
+As notações anteriores continuam funcionando, sem mudança de comportamento. A
+precedência é: constante em maiúsculas, constante minúscula da API clássica,
+propriedade estática e, por fim, a convenção.
 
 A API clássica mantém a declaração compacta originalmente usada pelo Mirabel:
 
@@ -263,16 +370,9 @@ Os nomes das constantes são compatíveis com a API clássica e podem ser
 minúsculos (`routing_keys`, `options`, `retry_options`). O PHP diferencia os
 nomes exatamente como declarados.
 
-### API com Envelope
-
-Para handlers tipados, o Worker também aceita `handle(Envelope $envelope)`:
+E a notação com propriedades estáticas:
 
 ```php
-<?php
-
-use Mirabel\RabbitMQ\Envelope;
-use Mirabel\RabbitMQ\Worker;
-
 final class OrderWorker extends Worker
 {
     public static string $queue = 'orders.worker';
@@ -281,6 +381,7 @@ final class OrderWorker extends Worker
         'delay' => 1000,
         'max_attempts' => 4,
     ];
+    public static array $options = ['queue_type' => 'quorum'];
 
     public function handle(Envelope $envelope): void
     {
@@ -288,6 +389,8 @@ final class OrderWorker extends Worker
     }
 }
 ```
+
+### API com Envelope
 
 O contrato do `handle()` é curto:
 
@@ -324,10 +427,10 @@ forma for implementada, o Worker lança `LogicException` ao processar a mensagem
 
 ### Quorum queues
 
-Para filas replicadas num cluster, declare o tipo nas opções do worker:
+Para filas replicadas num cluster, declare o tipo no worker:
 
 ```php
-public static array $options = ['queue_type' => 'quorum'];
+const QUEUE_TYPE = 'quorum';
 ```
 
 A fila, a `.retry` e a `.error` são criadas como quorum queues. Uma fila que
@@ -353,7 +456,8 @@ fila normal --limite atingido / reject / JSON inválido--> exchange error -> fil
 
 A fila retry recebe:
 
-- `x-message-ttl` a partir de `$retry['delay']` (ou `retry_options['x-message-ttl']`);
+- `x-message-ttl` a partir de `RETRY_DELAY` (ou `retry_options['x-message-ttl']`,
+  ou `$retry['delay']`);
 - `x-dead-letter-exchange` vazio — o *default exchange*, que roteia pelo nome da fila;
 - `x-dead-letter-routing-key` com o nome da fila normal.
 

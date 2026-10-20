@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Added — constant notation
+
+- **Events and workers are declared with constants.** An event needs at most
+  `const ROUTING_KEY` (and `const SCHEMA_VERSION`); a worker groups `QUEUE`,
+  `EVENTS`, `ROUTING_KEYS`, `ATTEMPTS`, `RETRY_DELAY`, `PREFETCH`, `QUEUE_TYPE`
+  and `EXCHANGE_TYPE` in one `const` statement.
+- **Convention for what is left out.** An event without a routing key is named
+  after its class (`PedidoPago` → `pedido.pago`, `OrderReceivedEvent` →
+  `order.received`) instead of throwing `LogicException`; a worker without
+  `QUEUE` gets its class name in kebab case (`EmitirNotaFiscal` →
+  `emitir-nota-fiscal`).
+- `EVENTS` subscribes by event class, so a routing key is written in one place.
+- `Worker::definition()` and `Event::routingKey()` show what was resolved,
+  without opening a connection.
+- The previous notations (lowercase `routing_keys`/`options`/`retry_options`
+  and the static properties) keep working; uppercase constants win.
+
 ### Fixed
 
 - **Retries no longer fan out to other services.** The retry queue used to
