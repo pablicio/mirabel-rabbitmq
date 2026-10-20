@@ -111,6 +111,25 @@ final class WorkerTopologyTest extends TestCase
         ));
     }
 
+    public function testAQuestionNobodyAnswersTimesOutAndStaysInTheQueue(): void
+    {
+        $worker = new StoppingWorker($this->exchange . '.ask', ['order.paid'], static function (): void {
+        });
+        $this->track($worker::$queue);
+        $worker->declare();
+        $started = microtime(true);
+
+        try {
+            (new PaidEvent(['order' => 1]))->ask(timeout: 1.0);
+            self::fail('Nobody answers, ask() must give up.');
+        } catch (\Mirabel\RabbitMQ\Exception\NoReplyException $exception) {
+            self::assertStringContainsString('order.paid', $exception->getMessage());
+        }
+
+        self::assertGreaterThanOrEqual(1.0, microtime(true) - $started);
+        self::assertSame(1, $worker->pending(), 'The question waits in the queue, for nobody.');
+    }
+
     public function testMandatoryEventWithoutAQueueComesBack(): void
     {
         putenv('MB_RABBITMQ_PUBLISHER_CONFIRMS=false');
